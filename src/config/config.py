@@ -4,12 +4,10 @@ from typing import Optional
 class Settings(BaseSettings):
     # API Configurations
     API_V1_STR: str = "/api"
-    PROJECT_NAME: str = "GeoAgent v3"
+    PROJECT_NAME: str = "GeoAgent v4 Unified"
     ALLOWED_ORIGINS: list[str] = [
-        "http://localhost:8001",
-        "http://localhost:8002",
-        "http://127.0.0.1:8001",
-        "http://127.0.0.1:8002"
+        "http://localhost:8000",
+        "http://127.0.0.1:8000"
     ]
     
     # LLM Settings
