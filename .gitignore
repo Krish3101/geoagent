@@ -20,6 +20,8 @@ ENV/
 *.sqlite
 .env
 
+cache/
+
 # Generated Agent Run Outputs
 runs/
 
