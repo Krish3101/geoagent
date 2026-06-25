@@ -18,12 +18,9 @@ ENV/
 # Databases & local configs
 *.db
 *.sqlite
-*/geoagent.db
-*/.env
 .env
 
 # Generated Agent Run Outputs
-*/runs/
 runs/
 
 # OS
