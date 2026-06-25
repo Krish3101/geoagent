@@ -6,9 +6,11 @@ from src.services.chat_service import handle_chat
 from src.models.session import SessionModel
 import uuid
 
+from shared import verify_token
+
 router = APIRouter()
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("/chat", response_model=ChatResponse, dependencies=[Depends(verify_token)])
 async def chat_endpoint(request: ChatRequest, db: Session = Depends(get_db)):
     session_id = request.session_id or uuid.uuid4().hex[:8]
     
@@ -69,3 +71,12 @@ async def get_artifacts(run_id: str):
                 })
                 
     return artifacts
+
+@router.get("/task/{run_id}")
+async def get_task_status(run_id: str):
+    from src.api.websockets import manager
+    status = await manager.get_task_status(run_id)
+    if not status:
+        status = "unknown"
+    return {"run_id": run_id, "status": status}
+

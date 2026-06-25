@@ -116,6 +116,7 @@ async function sendMessage() {
         const payload = { message: text };
         if (sessionId) payload.session_id = sessionId;
 
+        const token = localStorage.getItem('geoagent_token') || 'default_secret_token_123';
         let res;
         if (selectedFile) {
             appendMessage('agent', 'Uploading geometry file...', true);
@@ -125,6 +126,7 @@ async function sendMessage() {
             
             const uploadRes = await fetch(`/api/upload_geometry?session_id=${generatedSessionId}`, {
                 method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
                 body: formData
             });
             const uploadData = await uploadRes.json();
@@ -133,7 +135,10 @@ async function sendMessage() {
                 payload.session_id = generatedSessionId;
                 res = await fetch('/api/chat', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
                     body: JSON.stringify(payload)
                 });
             } else {
@@ -142,7 +147,10 @@ async function sendMessage() {
         } else {
              res = await fetch('/api/chat', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify(payload)
             });
         }

@@ -117,9 +117,13 @@ async function sendMessage() {
         if (sessionId) payload.session_id = sessionId;
 
         // Simplified for v3, handling file uploads would be separate logic routed to backend
+        const token = localStorage.getItem('geoagent_token') || 'default_secret_token_123';
         const res = await fetch('/api/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify(payload)
         });
         const data = await res.json();

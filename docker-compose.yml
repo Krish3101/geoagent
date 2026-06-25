@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: geoagent_redis
+    ports:
+      - "6381:6379"  # Unique host port
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  vector_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.vector
+    container_name: geoagent_vector
+    ports:
+      - "8001:8001"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - GEO_AGENT_SECRET_TOKEN=${GEO_AGENT_SECRET_TOKEN:-default_secret_token_123}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-google/gemma-3-27b-it}
+      - DATABASE_URL=sqlite:///./geoagent.db
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./vector_agent:/app/vector_agent
+      - ./shared:/app/shared
+    restart: always
+
+  raster_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.raster
+    container_name: geoagent_raster
+    ports:
+      - "8002:8002"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - GEO_AGENT_SECRET_TOKEN=${GEO_AGENT_SECRET_TOKEN:-default_secret_token_123}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-google/gemma-3-27b-it}
+      - DATABASE_URL=sqlite:///./geoagent.db
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./raster_agent:/app/raster_agent
+      - ./shared:/app/shared
+    restart: always
+
+volumes:
+  redisdata:

@@ -1,42 +1,31 @@
-# Environments
-.env
-.venv
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+.venv/
+venv/
+ENV/
+.pytest_cache/
+.ruff_cache/
+*.log
+*/.venv/
+*/venv/
+*/ENV/
+*/.pytest_cache/
+*/.ruff_cache/
+*/*.log
 
-# Databases and Data files
+# Databases & local configs
 *.db
-*.sqlite3
-geoagent.db
+*.sqlite
+*/geoagent.db
+*/.env
+.env
 
-# Agent specific outputs and caches
+# Generated Agent Run Outputs
+*/runs/
 runs/
-cache/
 
-# Geospatial formats (optional, just in case)
-*.shp
-*.shx
-*.dbf
-*.prj
-*.geojson
-*.zip
-
-# VS Code / IDE
-.vscode/
-.idea/
-
-# OS generated files
+# OS
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db

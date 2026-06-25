@@ -14,3 +14,5 @@ planetary-computer>=1.0.0
 pystac-client>=0.8.0
 odc-stac>=0.3.9
 rioxarray>=0.15.0
+redis>=5.0.0
+-e ../shared

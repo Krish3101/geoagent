@@ -1,6 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.core.config import settings
+from shared import setup_logging
+
+# Setup centralized logging
+setup_logging()
 
 def create_app() -> FastAPI:
     app = FastAPI(
@@ -12,7 +16,7 @@ def create_app() -> FastAPI:
     # Set all CORS enabled origins
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.ALLOWED_ORIGINS,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
