@@ -32,19 +32,11 @@ async def fetch_vector_data(
                 if shp_gdf[col].dtype == object and col != "geometry":
                     shp_gdf[col] = shp_gdf[col].astype(str)
             
-            shp_dir = runs_dir / f"{region_name.replace(' ', '_')}_{type_name}_shp"
-            shp_dir.mkdir(exist_ok=True)
-            shp_file = shp_dir / f"{region_name.replace(' ', '_')}_{type_name}.shp"
-            
-            def _write_shp():
-                shp_gdf.to_file(str(shp_file))
-            await loop.run_in_executor(None, _write_shp)
-            
-            zip_path = runs_dir / f"{region_name.replace(' ', '_')}_{type_name}_shp.zip"
-            def _write_zip():
-                shutil.make_archive(str(zip_path).replace('.zip', ''), 'zip', str(shp_dir))
-            await loop.run_in_executor(None, _write_zip)
-            results[f"vector_{type_name}_zip"] = str(zip_path)
+            gpkg_path = runs_dir / f"{region_name.replace(' ', '_')}_{type_name}.gpkg"
+            def _write_gpkg():
+                shp_gdf.to_file(str(gpkg_path), driver="GPKG")
+            await loop.run_in_executor(None, _write_gpkg)
+            results[f"vector_{type_name}_gpkg"] = str(gpkg_path)
 
         if "boundary" in data_types:
             try:

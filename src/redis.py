@@ -134,9 +134,9 @@ class StateManager:
     async def send_log(self, run_id: str, message: str):
         if "Task Completed" in message:
             await self.set_task_status(run_id, "completed")
-        elif "Task Failed" in message or "failed" in message.lower():
+        elif "Task Failed:" in message:
             await self.set_task_status(run_id, "failed")
-        elif "Plan initiated" in message:
+        elif "Agent started" in message:
             await self.set_task_status(run_id, "running")
             
         if self.use_redis:
