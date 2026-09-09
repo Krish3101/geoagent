@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 # Setup centralized logging
-setup_logging()
+setup_logging(settings.LOG_LEVEL)
 
 def create_app() -> FastAPI:
     app = FastAPI(
@@ -36,8 +36,8 @@ def create_app() -> FastAPI:
     frontend_dir = "frontend" if os.path.exists("frontend") else "/app/frontend"
     app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
     
-    os.makedirs("runs", exist_ok=True)
-    app.mount("/runs", StaticFiles(directory="runs"), name="runs")
+    os.makedirs(settings.RUNS_DIR, exist_ok=True)
+    app.mount(f"/{settings.RUNS_DIR}", StaticFiles(directory=settings.RUNS_DIR), name="runs")
     
     @app.get("/")
     async def serve_index():

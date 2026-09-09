@@ -3,13 +3,14 @@ import asyncio
 import shutil
 from typing import List, Optional, Any
 from pathlib import Path
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
 async def fetch_vector_data(
     region_name: str, data_types: List[str], run_id: str, geometry: Optional[Any] = None, bbox: Optional[List[float]] = None
 ) -> dict:
-    runs_dir = Path("runs") / run_id / "outputs" / "vector"
+    runs_dir = Path(settings.RUNS_DIR) / run_id / "outputs" / "vector"
     runs_dir.mkdir(parents=True, exist_ok=True)
     results = {}
     

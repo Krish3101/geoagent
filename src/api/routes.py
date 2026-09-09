@@ -8,6 +8,8 @@ import uuid
 import json
 import shapely.geometry
 from src.auth import verify_token
+from src.config import settings
+from pathlib import Path
 
 router = APIRouter()
 
@@ -36,13 +38,26 @@ async def chat_endpoint(request: ChatRequest, db: Session = Depends(get_db)):
 async def upload_geometry(session_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
         content = await file.read()
-        geojson_data = json.loads(content.decode("utf-8"))
+        try:
+            geojson_data = json.loads(content.decode("utf-8"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Uploaded file is not valid JSON/GeoJSON.")
         
-        features = geojson_data.get("features", [])
-        if not features:
-            raise HTTPException(status_code=400, detail="No features found in GeoJSON")
+        geom = None
+        if isinstance(geojson_data, dict):
+            if geojson_data.get("type") == "FeatureCollection":
+                features = geojson_data.get("features", [])
+                if not features:
+                    raise HTTPException(status_code=400, detail="No features found in GeoJSON FeatureCollection.")
+                geom = features[0].get("geometry")
+            elif geojson_data.get("type") == "Feature":
+                geom = geojson_data.get("geometry")
+            elif "coordinates" in geojson_data:
+                geom = geojson_data
+                
+        if not geom:
+            raise HTTPException(status_code=400, detail="No usable geometry found in uploaded file.")
             
-        geom = features[0].get("geometry")
         shape = shapely.geometry.shape(geom)
         bbox = list(shape.bounds)
         
@@ -62,14 +77,17 @@ async def upload_geometry(session_id: str, file: UploadFile = File(...), db: Ses
         messages = list(session.messages)
         messages.append({
             "role": "system",
-            "content": f"User uploaded a geometry file describing a region. Bounding box is {bbox}.",
+            "content": f"User uploaded a geometry file defining the active area of interest. Bounding box is {bbox}.",
             "run_id": None
         })
         session.messages = messages
         
         db.commit()
-        return {"status": "success", "message": "Geometry saved to session context."}
+        return {"status": "success", "message": "Geometry saved to session context.", "bbox": bbox}
         
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to process file: {str(e)}")
@@ -84,26 +102,25 @@ async def get_history(session_id: str, db: Session = Depends(get_db)):
 
 @router.get("/task/{run_id}/artifacts")
 async def get_artifacts(run_id: str):
-    import os
-    from pathlib import Path
-    
     artifacts = {"vector": [], "raster": []}
-    run_dir = Path("runs") / run_id / "outputs"
+    run_dir = Path(settings.RUNS_DIR) / run_id / "outputs"
     
-    if (run_dir / "vector").exists():
-        for file in (run_dir / "vector").iterdir():
+    vector_dir = run_dir / "vector"
+    if vector_dir.exists():
+        for file in vector_dir.iterdir():
             if file.is_file():
                 artifacts["vector"].append({
                     "name": file.name,
-                    "url": f"/runs/{run_id}/outputs/vector/{file.name}"
+                    "url": f"/{settings.RUNS_DIR}/{run_id}/outputs/vector/{file.name}"
                 })
                 
-    if (run_dir / "raster").exists():
-        for file in (run_dir / "raster").iterdir():
+    raster_dir = run_dir / "raster"
+    if raster_dir.exists():
+        for file in raster_dir.iterdir():
             if file.is_file():
                 artifacts["raster"].append({
                     "name": file.name,
-                    "url": f"/runs/{run_id}/outputs/raster/{file.name}"
+                    "url": f"/{settings.RUNS_DIR}/{run_id}/outputs/raster/{file.name}"
                 })
                 
     return artifacts

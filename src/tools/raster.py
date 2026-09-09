@@ -3,6 +3,8 @@ import asyncio
 from typing import List, Optional, Any
 from pathlib import Path
 
+from src.config import settings
+
 logger = logging.getLogger(__name__)
 
 async def fetch_raster_data(
@@ -13,11 +15,11 @@ async def fetch_raster_data(
     from pystac_client import Client
     import odc.stac
     
-    runs_dir = Path("runs") / run_id / "outputs" / "raster"
+    runs_dir = Path(settings.RUNS_DIR) / run_id / "outputs" / "raster"
     runs_dir.mkdir(parents=True, exist_ok=True)
     
     if not bbox and not geometry:
-        raise ValueError("fetch_raster requires either bbox or geometry. Run geocode first.")
+        raise ValueError("Spatial context must be established first (bbox or geometry required).")
         
     results = {}
     loop = asyncio.get_running_loop()

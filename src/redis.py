@@ -15,6 +15,7 @@ class StateManager:
         # Local in-memory fallbacks
         self._local_statuses: Dict[str, str] = {}
         self._local_ws_connections: Set[str] = set()
+        self._local_logs: Dict[str, list[str]] = {}
         
         # Local WebSocket connection objects (must be in memory)
         self.active_connections: Dict[str, WebSocket] = {}
@@ -32,18 +33,20 @@ class StateManager:
             logger.info("REDIS_URL not configured. Using local in-memory state.")
 
     async def check_connection(self) -> bool:
-        if not self.use_redis or not self.redis_client:
+        if not self.redis_client:
             return False
         try:
             await self.redis_client.ping()
+            self.use_redis = True
             return True
         except Exception as e:
-            logger.warning(f"Redis is not reachable, falling back to local state. Error: {e}")
+            if self.use_redis:
+                logger.warning(f"Redis is not reachable, falling back to local state. Error: {e}")
             self.use_redis = False
             return False
 
     async def get_task_status(self, run_id: str) -> Optional[str]:
-        if self.use_redis:
+        if self.redis_client:
             try:
                 await self.check_connection()
             except Exception:
@@ -58,7 +61,7 @@ class StateManager:
         return self._local_statuses.get(run_id)
 
     async def set_task_status(self, run_id: str, status: str):
-        if self.use_redis:
+        if self.redis_client:
             try:
                 await self.check_connection()
             except Exception:
@@ -75,7 +78,7 @@ class StateManager:
         self._local_statuses[run_id] = status
 
     async def get_active_connections(self) -> Set[str]:
-        if self.use_redis:
+        if self.redis_client:
             try:
                 await self.check_connection()
             except Exception:
@@ -94,11 +97,29 @@ class StateManager:
         await websocket.accept()
         self.active_connections[run_id] = websocket
         
-        if self.use_redis:
+        if self.redis_client:
             try:
                 await self.check_connection()
             except Exception:
                 pass
+
+        # Replay historical logs to subscriber (FR-5)
+        history = []
+        if self.use_redis:
+            try:
+                history = await self.redis_client.lrange(f"geoagent:log_history:{run_id}", 0, -1)
+            except Exception as e:
+                logger.warning(f"Redis lrange failed: {e}. Falling back to local history.")
+                history = self._local_logs.get(run_id, [])
+        else:
+            history = self._local_logs.get(run_id, [])
+
+        for log_line in history:
+            try:
+                await websocket.send_text(log_line)
+            except Exception as e:
+                logger.warning(f"Failed to replay log for {run_id}: {e}")
+                break
                 
         if self.use_redis:
             try:
@@ -115,7 +136,7 @@ class StateManager:
         if run_id in self.active_connections:
             del self.active_connections[run_id]
             
-        if self.use_redis:
+        if self.redis_client:
             try:
                 await self.check_connection()
             except Exception:
@@ -138,8 +159,11 @@ class StateManager:
             await self.set_task_status(run_id, "failed")
         elif "Agent started" in message:
             await self.set_task_status(run_id, "running")
+
+        # Always store in log history buffer for replay
+        self._local_logs.setdefault(run_id, []).append(message)
             
-        if self.use_redis:
+        if self.redis_client:
             try:
                 await self.check_connection()
             except Exception:
@@ -147,10 +171,11 @@ class StateManager:
                 
         if self.use_redis:
             try:
+                await self.redis_client.rpush(f"geoagent:log_history:{run_id}", message)
                 await self.redis_client.publish(f"geoagent:logs:{run_id}", message)
                 return
             except Exception as e:
-                logger.warning(f"Redis publish failed: {e}. Falling back to local state.")
+                logger.warning(f"Redis publish/rpush failed: {e}. Falling back to local state.")
                 
         if run_id in self.active_connections:
             try:
