@@ -15,16 +15,38 @@ ENV/
 */.ruff_cache/
 */*.log
 
+# Testing & Coverage
+.coverage
+coverage/
+htmlcov/
+.mypy_cache/
+
 # Databases & local configs
 *.db
 *.sqlite
+*.sqlite3
+*.db-journal
 .env
+.env.*
+!.env.example
 
 cache/
 
 # Generated Agent Run Outputs
 runs/
 
+# IDE & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
 Thumbs.db
+ehthumbs.db
