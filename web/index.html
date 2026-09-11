@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GeoAgent — Conversational GIS</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app-container">
+    <!-- Left Sidebar: Chat, Session Info, AOI Upload -->
+    <aside class="left-pane">
+      <header class="app-header">
+        <div class="brand">
+          <h1>GeoAgent</h1>
+        </div>
+        <div class="session-meta">
+          <span id="session-badge" class="badge">Session: Initializing...</span>
+          <button id="btn-new-session" class="btn-sm" title="Start a new session">New</button>
+        </div>
+      </header>
+
+      <div class="aoi-banner" id="aoi-banner">
+        <span class="aoi-label">Current AOI:</span>
+        <span id="aoi-display" class="aoi-value">None</span>
+      </div>
+
+      <!-- Messages Transcript -->
+      <div class="chat-transcript" id="chat-transcript">
+        <div class="system-bubble welcome-msg">
+          <strong>Welcome to GeoAgent.</strong> Ask for spatial data by place name, or drop a <code>.geojson</code> file to set your Area of Interest.
+        </div>
+      </div>
+
+      <!-- Input Bar -->
+      <div class="chat-input-container">
+        <form id="chat-form">
+          <div class="input-row">
+            <textarea
+              id="prompt-input"
+              rows="2"
+              placeholder="e.g. 'Get me the boundary of Central Park' or 'Now the buildings and roads'..."
+              required
+            ></textarea>
+            <button type="submit" id="btn-send" class="btn-primary">Send</button>
+          </div>
+        </form>
+        <div class="upload-row">
+          <label class="btn-secondary upload-btn">
+            Upload AOI (.geojson)
+            <input type="file" id="aoi-file-input" accept=".geojson,application/geo+json,application/json" />
+          </label>
+          <span id="upload-status" class="status-hint"></span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Right Pane: Map (Top) and Timeline / Artifacts (Bottom) -->
+    <main class="right-pane">
+      <div class="map-container" id="map-container">
+        <div id="map"></div>
+        <div class="map-overlay-info" id="map-info">No layers loaded</div>
+      </div>
+
+      <div class="activity-container">
+        <!-- Live Timeline -->
+        <section class="activity-section">
+          <div class="section-header">
+            <h3>Live Progress</h3>
+            <span id="task-status-badge" class="badge badge-neutral">Idle</span>
+          </div>
+          <div class="timeline" id="timeline">
+            <div class="timeline-empty">Waiting for a request...</div>
+          </div>
+        </section>
+
+        <!-- Artifact List -->
+        <section class="activity-section">
+          <div class="section-header">
+            <h3>Artifacts & Downloads</h3>
+            <span id="artifact-count-badge" class="badge badge-neutral">0 files</span>
+          </div>
+          <div class="artifact-list" id="artifact-list">
+            <div class="artifacts-empty">Generated GIS files will appear here.</div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

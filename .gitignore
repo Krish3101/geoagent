@@ -1,52 +1,31 @@
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
 .venv/
-venv/
-ENV/
+
+# Environment variables
+.env
+
+# Data (database + generated artifacts)
+data/
+
+# Tool caches
 .pytest_cache/
 .ruff_cache/
-*.log
-*/.venv/
-*/venv/
-*/ENV/
-*/.pytest_cache/
-*/.ruff_cache/
-*/*.log
-
-# Testing & Coverage
-.coverage
-coverage/
-htmlcov/
-.mypy_cache/
-
-# Databases & local configs
-*.db
-*.sqlite
-*.sqlite3
-*.db-journal
-.env
-.env.*
-!.env.example
-
 cache/
 
-# Generated Agent Run Outputs
-runs/
+# OS junk
+.DS_Store
+Thumbs.db
 
-# IDE & Editors
+# Editor
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
-
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-Thumbs.db
-ehthumbs.db

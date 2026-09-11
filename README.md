@@ -1,85 +1,85 @@
-# GeoAgent — Geospatial Assistant Powered by Pydantic-AI
+# GeoAgent
 
-![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009688?logo=fastapi&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-green)
+Ask for GIS data in plain language and get back real files — GeoJSON, GeoPackage, GeoTIFF.
+"Get me the boundary of Central Park", then "now the buildings and roads", then "and an
+NDVI for July 2024, under 10% cloud".
 
-GeoAgent is a unified geospatial AI assistant built on **FastAPI** and **Pydantic-AI**. It combines LLM-powered natural language understanding with robust geospatial capabilities to seamlessly fetch vector administrative boundaries (via OpenStreetMap) and raster satellite imagery (via Planetary Computer Sentinel-2 data).
+Normally that means geocoding the place, writing an Overpass or OSMnx query, searching a
+STAC catalogue for satellite scenes, filtering by cloud cover, and reprojecting between
+coordinate systems. GeoAgent does those steps and hands back the files.
 
----
+It runs locally for one person: no login, a local SQLite database, started with `uv`.
 
-## 🔥 Key Features
+## What the model is allowed to decide
 
-- **Agentic Routing:** Utilizes `pydantic-ai` to natively map pure Python functions into LLM tools, eliminating rigid planner-executor pipelines and complex orchestration loops.
-- **Unified Backend:** A single FastAPI service handles both vector and raster capabilities, exposed via a unified REST API and real-time WebSocket stream.
-- **Token Efficient:** Highly optimized LLM prompts (under ~30 words) ensure rapid, cost-effective inference on every request.
-- **Real-Time Streaming:** Features a robust state-manager (backed by Redis or an in-memory fallback) that streams logs and task statuses to the UI via WebSockets, ensuring zero missed updates even on late connections.
+Only *what* to fetch. It never touches coordinates, geometry or file paths — those live in
+the run context, and the tools read them from there. The model picks a place name, a layer
+and a date range; Python does every calculation.
 
----
+This is the whole design. A model that hallucinates a bounding box can't corrupt the
+output, because it was never asked for one. A wrong coordinate and a right one look
+identical downstream, so the safest thing is for the model never to produce one.
 
-## 🏗️ Architecture Design
+The session remembers the current area of interest between turns, which is what makes "now
+the buildings and roads" work without naming the park again. You can also upload your own
+GeoJSON polygon and everything after that clips to it.
 
-GeoAgent embraces a modular backend driven by modern async Python patterns.
+## Task state doesn't live in the connection
 
-### System Components
+Task state is a real state machine: `queued -> running -> succeeded` or `failed`. The
+server-sent events stream *reports* that state, it doesn't define it, so a dropped
+connection can't leave a task stuck in the wrong one.
 
-1. **FastAPI Application (`src/main.py`)**
-   - Serves the frontend, exposes REST endpoints, and manages WebSocket connections for live logs.
-2. **LLM Orchestrator (`src/agent.py`)**
-   - Leverages `pydantic-ai` to dynamically evaluate user prompts, select appropriate spatial tools, and execute workflows asynchronously.
-3. **Geospatial Tools (`src/tools/`)**
-   - `geocode(location)`: Converts textual place names into precise geometric constraints (bounding boxes, GeoJSON).
-   - `fetch_vector(region, ...)`: Extracts OSM boundaries and spatial features (buildings, roads), outputting GeoJSON and Shapefiles.
-   - `fetch_raster(region, dates, ...)`: Queries Planetary Computer for Sentinel-2 imagery (True Color, NDVI) using `odc-stac` and `rioxarray`.
-
-### Directory Structure
-
-```text
-geo_agent/
-├── Dockerfile
-├── docker-compose.yml
-├── pyproject.toml
-├── frontend/          # Vanilla JS unified UI
-├── tests/             # Pytest automated test suite (20/20 passing)
-└── src/
-    ├── main.py        # FastAPI entrypoint (Port 8000)
-    ├── agent.py       # pydantic-ai orchestrator
-    ├── api/           # HTTP & WebSocket routers
-    ├── config/        # Environment configurations
-    ├── models/        # SQLAlchemy database models
-    ├── services/      # Core background tasks & orchestrator execution
-    └── tools/         # Pure async Python geospatial functions
+```
+app/
+  agent.py       tool definitions given to the model
+  runner.py      task execution, event logging
+  routes.py      API and SSE endpoints
+  geo/geocode.py Nominatim lookup, throttled to 1 req/s
+  geo/vector.py  OSMnx features, GeoJSON and GeoPackage export
+  geo/raster.py  STAC search, cloud filtering, NDVI, GeoTIFF
+  models.py      sessions, tasks, events, artifacts
+web/             Leaflet map and chat UI
 ```
 
----
-
-## 🚀 Setup & Execution (Native `uv` Workflow)
-
-The project leverages [uv](https://github.com/astral-sh/uv) for lightning-fast dependency management and a root `Makefile` for one-click automation. 
-
-### Prerequisites
-1. Install `uv`.
-2. Copy `.env.example` to `.env` in the root directory and configure your `OPENROUTER_API_KEY`.
-
-### Quick Start Commands
+## Running it
 
 ```bash
-# 1. Install all dependencies
-make setup
-
-# 2. Run the test suite
-make test
-
-# 3. Start the unified agent backend
-make run
+./scripts/start.sh
 ```
 
-You can now visit the single UI at:
-- **GeoAgent UI:** http://localhost:8000
+The script checks for `uv`, creates `.env` if it's missing, asks for an OpenRouter API key,
+syncs dependencies, and serves on http://localhost:8000. By hand:
 
-### Docker Support
-Run the application (alongside the Redis state-manager) seamlessly via Docker Compose:
 ```bash
-make run-docker
+cp .env.example .env     # add OPENROUTER_API_KEY
+uv sync
+uv run uvicorn app.main:app --reload --port 8000
 ```
+
+`./scripts/reset.sh` clears the database, generated files and caches (`-y` to skip the
+prompt).
+
+```bash
+uv run pytest -q                # offline
+uv run pytest -m network        # hits Nominatim and Planetary Computer
+uv run ruff check . && uv run ruff format --check .
+```
+
+The offline suite covers the state machine, AOI validation and repair, NDVI arithmetic,
+resolution selection for large areas, artifact path traversal, and the SSE replay path.
+Network tests are deselected by default so a fresh clone runs clean.
+
+## Limits that are deliberate
+
+Nominatim is rate-limited to one request per second because their usage policy requires it,
+so geocoding is slow on purpose rather than by accident.
+
+Large areas are downsampled to 20 m or 60 m resolution and refused outright past a point —
+Sentinel-2 at 10 m over a few hundred kilometres is more pixels than this will handle.
+
+Everything is single-user with no auth, so don't put it on a public address.
+
+## License
+
+[MIT](LICENSE)
