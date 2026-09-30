@@ -7,7 +7,6 @@ import shapely.geometry
 from shapely.validation import make_valid
 
 from app.config import settings
-from app.geo.geocode import compute_geodesic_area_km2
 
 Layer = Literal[
     "boundary",
@@ -20,7 +19,6 @@ Layer = Literal[
 ]
 
 LAYER_TAG_MAP: dict[str, dict[str, Any]] = {
-    "boundary": {"boundary": "administrative"},
     "buildings": {"building": True},
     "roads": {"highway": True},
     "waterways": {"waterway": True},
@@ -35,14 +33,15 @@ def extract_vector_layer(
     layer: str,
     output_dir: Path,
     slug: str,
-) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+) -> list[dict[str, Any]]:
     """Extract a single OSM vector layer for an AOI and export GeoJSON + GPKG.
 
-    Returns:
-        (artifacts_metadata_list, refined_aoi_or_none)
+    "boundary" is the outline of the place itself, as geocoded. Every other layer is what
+    OpenStreetMap has inside that outline.
     """
-    if layer not in LAYER_TAG_MAP:
-        raise ValueError(f"Unknown layer '{layer}'. Must be one of {list(LAYER_TAG_MAP.keys())}")
+    if layer != "boundary" and layer not in LAYER_TAG_MAP:
+        valid = ["boundary", *LAYER_TAG_MAP]
+        raise ValueError(f"Unknown layer '{layer}'. Must be one of {valid}")
 
     area_km2 = aoi.get("area_km2", 0.0)
     if area_km2 > settings.vector_max_area_km2 and layer != "boundary":
@@ -57,20 +56,22 @@ def extract_vector_layer(
         raise ValueError("AOI has no geometry")
 
     polygon = make_valid(shapely.geometry.shape(geom_dict))
-    tags = LAYER_TAG_MAP[layer]
 
     output_dir.mkdir(parents=True, exist_ok=True)
     geojson_path = output_dir / f"{slug}_{layer}.geojson"
     gpkg_path = output_dir / f"{slug}_{layer}.gpkg"
 
-    try:
-        gdf = ox.features_from_polygon(polygon, tags)
-    except Exception as e:
-        # If no elements are found, OSMnx may raise or return empty
-        if "No data elements in server response" in str(e) or "empty" in str(e).lower():
-            gdf = gpd.GeoDataFrame(columns=["geometry"], crs="EPSG:4326")
-        else:
-            raise RuntimeError(f"Overpass extraction failed for layer '{layer}': {e}") from e
+    if layer == "boundary":
+        gdf = gpd.GeoDataFrame({"name": [aoi.get("name")]}, geometry=[polygon], crs="EPSG:4326")
+    else:
+        try:
+            gdf = ox.features_from_polygon(polygon, LAYER_TAG_MAP[layer])
+        except Exception as e:
+            # If no elements are found, OSMnx may raise or return empty
+            if "No data elements in server response" in str(e) or "empty" in str(e).lower():
+                gdf = gpd.GeoDataFrame(columns=["geometry"], crs="EPSG:4326")
+            else:
+                raise RuntimeError(f"Overpass extraction failed for layer '{layer}': {e}") from e
 
     if gdf is None or gdf.empty:
         gdf = gpd.GeoDataFrame(columns=["geometry"], crs="EPSG:4326")
@@ -132,24 +133,4 @@ def extract_vector_layer(
         },
     ]
 
-    refined_aoi = None
-    if layer == "boundary" and not gdf.empty:
-        try:
-            polygons = [g for g in gdf["geometry"] if g.geom_type in ("Polygon", "MultiPolygon")]
-            if polygons:
-                refined_geom = shapely.unary_union(polygons)
-                refined_geom = make_valid(refined_geom)
-                if not refined_geom.is_empty:
-                    refined_bounds = [round(b, 6) for b in refined_geom.bounds]
-                    refined_area = compute_geodesic_area_km2(refined_geom)
-                    refined_aoi = {
-                        "name": aoi.get("name", "Derived boundary"),
-                        "source": "derived",
-                        "geometry": shapely.geometry.mapping(refined_geom),
-                        "bbox": refined_bounds,
-                        "area_km2": refined_area,
-                    }
-        except Exception:
-            refined_aoi = None
-
-    return artifacts, refined_aoi
+    return artifacts

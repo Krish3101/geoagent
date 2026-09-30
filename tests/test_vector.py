@@ -9,7 +9,8 @@ from app.geo import vector
 
 
 def test_all_layers_have_tags():
-    valid_layers = get_args(vector.Layer)
+    # Every layer except the boundary (the AOI outline itself) is an OpenStreetMap query.
+    valid_layers = [lyr for lyr in get_args(vector.Layer) if lyr != "boundary"]
     for lyr in valid_layers:
         assert lyr in vector.LAYER_TAG_MAP
         assert len(vector.LAYER_TAG_MAP[lyr]) > 0
@@ -42,21 +43,19 @@ def test_area_guard_exempts_boundary(tmp_path: Path, monkeypatch):
         },
     }
 
-    # Mock osmnx.features_from_polygon
-    mock_gdf = gpd.GeoDataFrame(
-        [{"geometry": Polygon([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]), "name": "Boundary Line"}],
-        crs="EPSG:4326",
-    )
-    monkeypatch.setattr(vector.ox, "features_from_polygon", lambda poly, tags: mock_gdf)
+    # The boundary is the AOI's own outline, so OpenStreetMap should never be queried.
+    def fail(*args):
+        raise AssertionError("boundary should not query OpenStreetMap")
 
-    artifacts, refined_aoi = vector.extract_vector_layer(
-        large_aoi, "boundary", tmp_path, "huge_region"
-    )
+    monkeypatch.setattr(vector.ox, "features_from_polygon", fail)
+
+    artifacts = vector.extract_vector_layer(large_aoi, "boundary", tmp_path, "huge_region")
     assert len(artifacts) == 2  # geojson and gpkg
-    assert (tmp_path / "huge_region_boundary.geojson").exists()
-    assert (tmp_path / "huge_region_boundary.gpkg").exists()
-    assert refined_aoi is not None
-    assert refined_aoi["source"] == "derived"
+    assert artifacts[0]["meta"]["feature_count"] == 1
+
+    gdf = gpd.read_file(tmp_path / "huge_region_boundary.geojson")
+    assert gdf.iloc[0]["name"] == "Huge Region"
+    assert gdf.geometry.iloc[0].equals(Polygon([[-100, 30], [-90, 30], [-90, 40], [-100, 40]]))
 
 
 def test_object_dtype_stringified_in_gpkg(tmp_path: Path, monkeypatch):
@@ -83,7 +82,7 @@ def test_object_dtype_stringified_in_gpkg(tmp_path: Path, monkeypatch):
     )
     monkeypatch.setattr(vector.ox, "features_from_polygon", lambda poly, tags: mock_gdf)
 
-    artifacts, _ = vector.extract_vector_layer(aoi, "buildings", tmp_path, "small_park")
+    vector.extract_vector_layer(aoi, "buildings", tmp_path, "small_park")
 
     # Read written GPKG back and verify it succeeded without crash
     gpkg_file = tmp_path / "small_park_buildings.gpkg"

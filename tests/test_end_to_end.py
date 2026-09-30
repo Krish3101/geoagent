@@ -46,7 +46,7 @@ async def test_session_reuses_stored_aoi(test_env, monkeypatch):
                 "bounds": [4.8, 52.3, 4.9, 52.4],
                 "meta": {"layer": layer, "feature_count": 10, "crs": "EPSG:4326"},
             }
-        ], None
+        ]
 
     monkeypatch.setattr("app.agent.extract_vector_layer", mock_extract)
 
@@ -263,7 +263,7 @@ async def test_vector_export_is_valid_geojson_and_gpkg(tmp_path: Path):
         },
     }
 
-    artifacts, _ = extract_vector_layer(central_park_aoi, "boundary", tmp_path, "cp")
+    artifacts = extract_vector_layer(central_park_aoi, "landuse", tmp_path, "cp")
     geojson_art = next(a for a in artifacts if a["filename"].endswith(".geojson"))
     gpkg_art = next(a for a in artifacts if a["filename"].endswith(".gpkg"))
 

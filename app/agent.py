@@ -159,7 +159,7 @@ async def extract_vector(ctx: RunContext[RunDeps], layers: list[Layer]) -> str:
 
     for layer in layers:
         try:
-            artifacts, refined_aoi = await asyncio.to_thread(
+            artifacts = await asyncio.to_thread(
                 extract_vector_layer,
                 aoi=aoi,
                 layer=layer,
@@ -184,10 +184,6 @@ async def extract_vector(ctx: RunContext[RunDeps], layers: list[Layer]) -> str:
 
         feature_count = artifacts[0]["meta"]["feature_count"] if artifacts else 0
         summaries.append(f"{feature_count:,} {layer}")
-
-        if refined_aoi:
-            ctx.deps.aoi = refined_aoi
-            ctx.deps.aoi_changed = True
 
     return f"Extracted {', '.join(summaries)}. Wrote {total_files} files."
 
