@@ -160,7 +160,7 @@ async def upload_aoi(
 
     try:
         body = await request.json()
-    except Exception as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {e}")
 
     if not body or not isinstance(body, dict):

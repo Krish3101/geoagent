@@ -1,5 +1,4 @@
 let sessionId = localStorage.getItem("geoagent_session_id");
-let currentTaskId = null;
 let eventSource = null;
 
 const sessionBadge = document.getElementById("session-badge");
@@ -172,7 +171,6 @@ chatForm.addEventListener("submit", async (e) => {
     }
 
     const data = await res.json();
-    currentTaskId = data.task_id;
     startTaskListening(data.task_id, data.events_url);
   } catch (err) {
     appendMessage("system", `Network error: ${err.message}`);
