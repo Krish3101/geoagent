@@ -117,9 +117,13 @@ async function loadMessages() {
     if (!res.ok) return;
     const messages = await res.json();
     chatTranscript.innerHTML = "";
+    let lastTaskId = null;
     for (const msg of messages) {
       appendMessage(msg.role, msg.content);
+      if (msg.task_id) lastTaskId = msg.task_id;
     }
+    // Show the files from the last request again after a reload.
+    if (lastTaskId) await loadArtifacts(lastTaskId);
   } catch (err) {
     console.error("Failed to load messages:", err);
   }
@@ -128,7 +132,8 @@ async function loadMessages() {
 function appendMessage(role, content) {
   const bubble = document.createElement("div");
   bubble.className = `message-bubble ${role}-bubble`;
-  bubble.textContent = content;
+  // Replies are shown as plain text, so drop the Markdown bold markers models like to add.
+  bubble.textContent = content.replace(/\*\*(.+?)\*\*/g, "$1");
   chatTranscript.appendChild(bubble);
   chatTranscript.scrollTop = chatTranscript.scrollHeight;
 }
