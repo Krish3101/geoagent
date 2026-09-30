@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from openai import APIConnectionError
 from sqlalchemy import func, select
 
 from app.config import settings
@@ -167,6 +168,9 @@ def failure_reply(error: Exception) -> str:
             "The free model is out of requests for now. OpenRouter allows 50 a day on the "
             "free tier, reset at 00:00 UTC, so try again after that."
         )
+    # pydantic-ai wraps the openai error, so look at what it was raised from too.
+    if isinstance(error, APIConnectionError) or isinstance(error.__cause__, APIConnectionError):
+        return "Couldn't reach OpenRouter. Check your internet connection and try again."
     return f"That request failed: {error}"
 
 

@@ -178,6 +178,18 @@ def test_rate_limit_reply_says_when_to_try_again():
     assert "00:00 UTC" in failure_reply(error)
 
 
+def test_connection_error_reply_says_what_to_do():
+    import httpx
+    from openai import APIConnectionError
+    from pydantic_ai.exceptions import ModelAPIError
+
+    cause = APIConnectionError(request=httpx.Request("POST", "https://openrouter.ai"))
+    try:
+        raise ModelAPIError("free-model", "Connection error.") from cause
+    except ModelAPIError as wrapped:
+        assert "internet connection" in failure_reply(wrapped)
+
+
 @pytest.mark.asyncio
 async def test_run_task_success(test_env, monkeypatch):
     from unittest.mock import AsyncMock, MagicMock
