@@ -185,7 +185,7 @@ async def upload_aoi(
                 raise ValueError("Feature must have geometry")
             validate_coords_wgs84(geom.get("coordinates"))
             features_list.append(geom)
-        elif geom_type in ("Polygon", "MultiPolygon", "Point", "LineString", "MultiLineString"):
+        elif geom_type in ("Polygon", "MultiPolygon"):
             validate_coords_wgs84(body.get("coordinates"))
             features_list.append(body)
         else:
@@ -207,6 +207,9 @@ async def upload_aoi(
 
         if combined.is_empty:
             raise ValueError("Resulting geometry is empty")
+        # Points and lines have no area to search inside.
+        if combined.geom_type not in ("Polygon", "MultiPolygon"):
+            raise ValueError("Upload a polygon; points and lines have no area to search")
 
         bbox = [round(b, 6) for b in combined.bounds]
         area_km2 = compute_geodesic_area_km2(combined)

@@ -156,6 +156,7 @@ async def extract_vector(ctx: RunContext[RunDeps], layers: list[Layer]) -> str:
 
     total_files = 0
     summaries = []
+    failures = []
 
     for layer in layers:
         try:
@@ -167,7 +168,9 @@ async def extract_vector(ctx: RunContext[RunDeps], layers: list[Layer]) -> str:
                 slug=slug,
             )
         except Exception as e:
-            return f"Failed to extract layer '{layer}': {e}"
+            # Keep going, so one failed layer doesn't hide the ones that worked.
+            failures.append(f"{layer} failed ({e})")
+            continue
 
         for art in artifacts:
             rel_path = f"runs/{ctx.deps.task_id}/vector/{art['filename']}"
@@ -185,7 +188,12 @@ async def extract_vector(ctx: RunContext[RunDeps], layers: list[Layer]) -> str:
         feature_count = artifacts[0]["meta"]["feature_count"] if artifacts else 0
         summaries.append(f"{feature_count:,} {layer}")
 
-    return f"Extracted {', '.join(summaries)}. Wrote {total_files} files."
+    parts = []
+    if summaries:
+        parts.append(f"Extracted {', '.join(summaries)}. Wrote {total_files} files.")
+    if failures:
+        parts.append(f"{'; '.join(failures)}.")
+    return " ".join(parts)
 
 
 @agent.tool

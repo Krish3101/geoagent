@@ -140,3 +140,21 @@ async def test_aoi_empty_collection_fails(client: AsyncClient):
 
     put_res = await client.put(f"/api/sessions/{sid}/aoi", json=empty_fc)
     assert put_res.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_aoi_point_is_refused(client: AsyncClient):
+    sess_res = await client.post("/api/sessions")
+    sid = sess_res.json()["id"]
+
+    point = {"type": "Point", "coordinates": [4.9, 52.37]}
+    put_res = await client.put(f"/api/sessions/{sid}/aoi", json=point)
+    assert put_res.status_code == 400
+
+    points = {
+        "type": "FeatureCollection",
+        "features": [{"type": "Feature", "geometry": point, "properties": {}}],
+    }
+    put_res = await client.put(f"/api/sessions/{sid}/aoi", json=points)
+    assert put_res.status_code == 400
+    assert "polygon" in put_res.json()["detail"].lower()

@@ -84,6 +84,47 @@ async def test_session_reuses_stored_aoi(test_env, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_one_failed_layer_does_not_hide_the_others(test_env, monkeypatch):
+    def mock_extract(aoi, layer, output_dir, slug):
+        if layer == "roads":
+            raise RuntimeError("Overpass timed out")
+        return [
+            {
+                "kind": "vector",
+                "filename": f"{slug}_{layer}.geojson",
+                "size_bytes": 100,
+                "bounds": [4.8, 52.3, 4.9, 52.4],
+                "meta": {"layer": layer, "feature_count": 10, "crs": "EPSG:4326"},
+            }
+        ]
+
+    monkeypatch.setattr("app.agent.extract_vector_layer", mock_extract)
+    monkeypatch.setattr("app.agent.log_event", lambda *args, **kwargs: asyncio.sleep(0))
+    monkeypatch.setattr("app.agent.record_artifact", lambda *args, **kwargs: asyncio.sleep(0))
+
+    class DummyContext:
+        def __init__(self, deps):
+            self.deps = deps
+
+    square = [[[4.8, 52.3], [4.9, 52.3], [4.9, 52.4], [4.8, 52.4], [4.8, 52.3]]]
+    deps = RunDeps(
+        task_id="two-layers",
+        session_id="s",
+        aoi={
+            "name": "Amsterdam",
+            "geometry": {"type": "Polygon", "coordinates": square},
+            "bbox": [4.8, 52.3, 4.9, 52.4],
+            "area_km2": 50.0,
+        },
+    )
+
+    result = await extract_vector(DummyContext(deps), ["buildings", "roads"])
+
+    assert "Extracted 10 buildings" in result
+    assert "roads failed (Overpass timed out)" in result
+
+
+@pytest.mark.asyncio
 async def test_uploaded_aoi_beats_geocoding(test_env, client: AsyncClient, monkeypatch):
     """Uploaded AOI is used directly without calling Nominatim."""
     sess_res = await client.post("/api/sessions")
