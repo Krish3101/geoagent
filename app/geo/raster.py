@@ -33,19 +33,36 @@ def estimate_resolution(bbox: list[float], max_pixels: int) -> int:
     )
 
 
-def compute_ndvi_array(nir: np.ndarray, red: np.ndarray) -> np.ndarray:
-    """Compute NDVI array with float32, nodata -9999.0, clipped to [-1.0, 1.0]."""
-    nir = nir.astype(np.float32)
-    red = red.astype(np.float32)
+# From processing baseline 04.00 (January 2022) ESA adds 1000 to every L2A reflectance
+# value, so values below zero still fit in an unsigned integer. Planetary Computer serves
+# the files as ESA publishes them, so the offset has to come off before NDVI means anything.
+BOA_ADD_OFFSET = 1000
+
+
+def reflectance_offset(item: Any) -> int:
+    """The offset to subtract from this scene's band values: 1000 from baseline 04.00, else 0."""
+    try:
+        baseline = float(item.properties.get("s2:processing_baseline", "0"))
+    except (TypeError, ValueError):
+        return 0
+    return BOA_ADD_OFFSET if baseline >= 4.0 else 0
+
+
+def compute_ndvi_array(nir: np.ndarray, red: np.ndarray, offset: int = 0) -> np.ndarray:
+    """Compute NDVI as float32, clipped to [-1.0, 1.0], with -9999.0 for no data.
+
+    offset is subtracted from both bands first (see BOA_ADD_OFFSET). A band value of 0 is
+    Sentinel-2's no-data value, so those pixels come out as -9999.0.
+    """
+    no_data = (nir == 0) | (red == 0)
+    nir = nir.astype(np.float32) - offset
+    red = red.astype(np.float32) - offset
     denom = nir + red
 
     with np.errstate(divide="ignore", invalid="ignore"):
-        ndvi = (nir - red) / denom
-        ndvi = np.where(denom == 0, -9999.0, ndvi)
-        ndvi = np.where(np.isnan(ndvi), -9999.0, ndvi)
-        ndvi = np.where((ndvi != -9999.0) & (ndvi > 1.0), 1.0, ndvi)
-        ndvi = np.where((ndvi != -9999.0) & (ndvi < -1.0), -1.0, ndvi)
+        ndvi = np.clip((nir - red) / denom, -1.0, 1.0)
 
+    ndvi = np.where(no_data | (denom == 0) | np.isnan(ndvi), -9999.0, ndvi)
     return ndvi.astype(np.float32)
 
 
@@ -130,7 +147,7 @@ def fetch_raster_product(
     if product == "ndvi":
         nir = ds["B08"].isel(time=0).values
         red = ds["B04"].isel(time=0).values
-        ndvi_arr = compute_ndvi_array(nir, red)
+        ndvi_arr = compute_ndvi_array(nir, red, offset=reflectance_offset(best_items[0]))
 
         # Write using rioxarray DataArray
         da = ds["B04"].isel(time=0).copy(data=ndvi_arr)

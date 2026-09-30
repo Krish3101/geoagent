@@ -28,6 +28,27 @@ def test_compute_ndvi_formula_and_constraints():
     assert np.all(ndvi[valid_mask] <= 1.0)
 
 
+def test_ndvi_removes_the_reflectance_offset():
+    # Reflectance 0.2 (NIR) and 0.05 (red) is NDVI 0.6. Since baseline 04.00 they are
+    # stored as 3000 and 1500, which without the offset would give 0.333.
+    nir = np.array([[3000]], dtype=np.uint16)
+    red = np.array([[1500]], dtype=np.uint16)
+
+    ndvi = raster.compute_ndvi_array(nir, red, offset=1000)
+
+    assert pytest.approx(ndvi[0, 0], 1e-4) == 0.6
+
+
+def test_offset_depends_on_the_processing_baseline():
+    class Item:
+        def __init__(self, baseline):
+            self.properties = {"s2:processing_baseline": baseline}
+
+    assert raster.reflectance_offset(Item("05.11")) == 1000
+    assert raster.reflectance_offset(Item("04.00")) == 1000
+    assert raster.reflectance_offset(Item("03.01")) == 0
+
+
 def test_estimate_resolution_adaptive_stepping():
     # Small box: ~1km x ~1km -> 10m has (1000/10) * (1000/10) = 10,000 pixels <= 40M -> 10m
     small_bbox = [0.0, 0.0, 0.01, 0.01]

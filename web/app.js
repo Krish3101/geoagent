@@ -25,6 +25,8 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 
 const aoiLayerGroup = L.featureGroup().addTo(map);
 const vectorLayerGroup = L.featureGroup().addTo(map);
+// Files already on the map, so reloading the file list doesn't draw them twice.
+const drawnArtifactIds = new Set();
 
 // Color palette for layers
 const LAYER_COLORS = {
@@ -72,6 +74,7 @@ async function createNewSession() {
     `;
     aoiLayerGroup.clearLayers();
     vectorLayerGroup.clearLayers();
+    drawnArtifactIds.clear();
     timeline.innerHTML = '<div class="timeline-empty">Waiting for a request...</div>';
     artifactList.innerHTML = '<div class="artifacts-empty">Generated GIS files will appear here.</div>';
     artifactCountBadge.textContent = "0 files";
@@ -197,11 +200,11 @@ function startTaskListening(taskId, eventsUrl) {
       if (data.stage === "done") {
         taskStatusBadge.className = "badge badge-succeeded";
         taskStatusBadge.textContent = "Succeeded";
-        finishTask(taskId);
+        finishTask();
       } else if (data.stage === "error") {
         taskStatusBadge.className = "badge badge-failed";
         taskStatusBadge.textContent = "Failed";
-        finishTask(taskId);
+        finishTask();
       }
     } catch (e) {
       console.error("Error parsing event:", e);
@@ -236,7 +239,7 @@ function appendTimelineEvent(ev) {
   timeline.scrollTop = timeline.scrollHeight;
 }
 
-async function finishTask(taskId) {
+async function finishTask() {
   if (eventSource) {
     eventSource.close();
     eventSource = null;
@@ -251,8 +254,6 @@ async function finishTask(taskId) {
     const data = await res.json();
     updateSessionUI(data);
   }
-
-  await loadArtifacts(taskId);
 }
 
 async function loadArtifacts(taskId) {
@@ -310,6 +311,8 @@ function renderArtifactCard(art) {
 }
 
 async function loadGeoJsonToMap(art) {
+  if (drawnArtifactIds.has(art.id)) return;
+  drawnArtifactIds.add(art.id);
   try {
     const res = await fetch(art.download_url);
     if (!res.ok) return;
