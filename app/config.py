@@ -12,7 +12,6 @@ class Settings(BaseSettings):
     )
 
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
-    llm_model: str = Field(default="anthropic/claude-sonnet-4.5", alias="LLM_MODEL")
     llm_base_url: str = Field(default="https://openrouter.ai/api/v1", alias="LLM_BASE_URL")
     data_dir: Path = Field(default=Path("./data"), alias="DATA_DIR")
     nominatim_user_agent: str = Field(

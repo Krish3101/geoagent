@@ -26,11 +26,16 @@ class RunDeps:
     aoi_changed: bool = False
 
 
+# Free on OpenRouter and handles tool calls. If OpenRouter retires it, this is the one
+# line to change.
+MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+
+
 def get_model() -> OpenAIChatModel:
     api_key = settings.openrouter_api_key or "sk-placeholder"
     client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=api_key)
     provider = OpenRouterProvider(openai_client=client)
-    return OpenAIChatModel(settings.llm_model, provider=provider)
+    return OpenAIChatModel(MODEL, provider=provider)
 
 
 agent = Agent(

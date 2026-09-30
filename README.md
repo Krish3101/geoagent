@@ -49,7 +49,8 @@ web/             Leaflet map and chat UI
 ```
 
 The script checks for `uv`, creates `.env` if it's missing, asks for an OpenRouter API key,
-syncs dependencies, and serves on http://localhost:8000. By hand:
+syncs dependencies, and serves on http://localhost:8000. The model is
+`nvidia/nemotron-3-super-120b-a12b:free`, so a free OpenRouter key is enough. By hand:
 
 ```bash
 cp .env.example .env     # add OPENROUTER_API_KEY
