@@ -2,7 +2,7 @@
 
 [![tests](https://github.com/Krish3101/geoagent/actions/workflows/tests.yml/badge.svg)](https://github.com/Krish3101/geoagent/actions/workflows/tests.yml)
 
-Ask for GIS data in plain language and get back real files — GeoJSON, GeoPackage, GeoTIFF.
+Ask for GIS data in plain language and get back real files: GeoJSON, GeoPackage, GeoTIFF.
 "Get me the boundary of Central Park", then "now the buildings and roads", then "and an
 NDVI for July 2024, under 10% cloud".
 
@@ -14,7 +14,7 @@ It runs locally for one person: no login, a local SQLite database, started with 
 
 ## What the model is allowed to decide
 
-Only *what* to fetch. It never touches coordinates, geometry or file paths — those live in
+Only *what* to fetch. It never touches coordinates, geometry or file paths. Those live in
 the run context, and the tools read them from there. The model picks a place name, a layer
 and a date range; Python does every calculation.
 
@@ -78,7 +78,7 @@ Network tests are deselected by default so a fresh clone runs clean.
 Nominatim is rate-limited to one request per second because their usage policy requires it,
 so geocoding is slow on purpose rather than by accident.
 
-Large areas are downsampled to 20 m or 60 m resolution and refused outright past a point —
+Large areas are downsampled to 20 m or 60 m resolution and refused outright past a point.
 Sentinel-2 at 10 m over a few hundred kilometres is more pixels than this will handle.
 
 Everything is single-user with no auth, so don't put it on a public address.

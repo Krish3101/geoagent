@@ -123,7 +123,7 @@ async def resolve_area(ctx: RunContext[RunDeps], place: str) -> str:
     name = aoi_data["name"]
     area_km2 = aoi_data["area_km2"]
     await log_event(ctx.deps.task_id, "geocoding", f"Resolved to {name} ({area_km2} km²)")
-    return f"Resolved to {name} — {area_km2} km²."
+    return f"Resolved to {name} ({area_km2} km²)."
 
 
 @agent.tool
