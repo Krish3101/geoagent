@@ -12,6 +12,8 @@ coordinate systems. GeoAgent does those steps and hands back the files.
 
 It runs locally for one person: no login, a local SQLite database, started with `uv`.
 
+**Stack:** Python 3.12, FastAPI, pydantic-ai over OpenRouter, GeoPandas, OSMnx, Shapely, pystac-client with odc-stac and rioxarray, SQLAlchemy on SQLite, Leaflet.
+
 ## What the model is allowed to decide
 
 Only *what* to fetch. It never touches coordinates, geometry or file paths. Those live in
