@@ -1,5 +1,7 @@
 # GeoAgent
 
+[![tests](https://github.com/Krish3101/geoagent/actions/workflows/tests.yml/badge.svg)](https://github.com/Krish3101/geoagent/actions/workflows/tests.yml)
+
 Ask for GIS data in plain language and get back real files — GeoJSON, GeoPackage, GeoTIFF.
 "Get me the boundary of Central Park", then "now the buildings and roads", then "and an
 NDVI for July 2024, under 10% cloud".
