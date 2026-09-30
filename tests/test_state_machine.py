@@ -7,6 +7,7 @@ from app.runner import (
     STATUS_QUEUED,
     STATUS_RUNNING,
     STATUS_SUCCEEDED,
+    failure_reply,
     log_event,
     run_task,
     transition,
@@ -162,6 +163,19 @@ async def test_run_task_missing_api_key_fails_gracefully(test_env, monkeypatch):
         stages = [e.stage for e in events]
         assert "starting" in stages
         assert "error" in stages
+
+        reply = (
+            await session.execute(select(Message).where(Message.task_id == task_id))
+        ).scalar_one()
+        assert reply.role == "assistant"
+        assert "OPENROUTER_API_KEY is not configured" in reply.content
+
+
+def test_rate_limit_reply_says_when_to_try_again():
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    error = ModelHTTPError(status_code=429, model_name="free-model", body={})
+    assert "00:00 UTC" in failure_reply(error)
 
 
 @pytest.mark.asyncio

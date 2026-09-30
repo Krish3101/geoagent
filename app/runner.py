@@ -160,6 +160,16 @@ async def save_aoi_if_changed(deps: Any) -> None:
             await session.commit()
 
 
+def failure_reply(error: Exception) -> str:
+    """What the chat shows when a task fails, so the question doesn't sit there unanswered."""
+    if getattr(error, "status_code", None) == 429:
+        return (
+            "The free model is out of requests for now. OpenRouter allows 50 a day on the "
+            "free tier, reset at 00:00 UTC, so try again after that."
+        )
+    return f"That request failed: {error}"
+
+
 async def run_task(task_id: str) -> None:
     """Execute task through state machine and Pydantic-AI agent."""
     from app.agent import agent
@@ -186,5 +196,6 @@ async def run_task(task_id: str) -> None:
         await log_event(task_id, "done", "Completed")
     except Exception as e:
         logger.exception("Task %s failed: %s", task_id, e)
+        await save_assistant_message(task_id, failure_reply(e))
         await transition(task_id, STATUS_FAILED, error=str(e))
         await log_event(task_id, "error", str(e))
