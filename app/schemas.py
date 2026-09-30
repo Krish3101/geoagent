@@ -55,13 +55,6 @@ class TaskResponse(BaseModel):
     artifact_count: int = 0
 
 
-class TaskEventResponse(BaseModel):
-    seq: int
-    stage: str
-    message: str
-    created_at: datetime
-
-
 class ArtifactItem(BaseModel):
     id: str
     filename: str
