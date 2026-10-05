@@ -4,34 +4,32 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GeoAgent: Conversational GIS</title>
-  <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌍</text></svg>" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <div class="app-container">
-    <!-- Left Sidebar: Chat, Session Info, AOI Upload -->
-    <aside class="left-pane">
+    <!-- Left Sidebar: Chat & Session Info -->
+    <aside class="left-pane" aria-label="Chat and session controls">
       <header class="app-header">
         <div class="brand">
           <h1>GeoAgent</h1>
+          <span class="tagline">Describe a place. Get OSM vector layers & Sentinel-2 NDVI.</span>
         </div>
         <div class="session-meta">
           <span id="session-badge" class="badge">Session: Initializing...</span>
-          <button id="btn-new-session" class="btn-sm" title="Start a new session">New</button>
+          <button id="btn-new-session" class="btn-sm" title="Start a new chat session">New chat</button>
         </div>
       </header>
 
       <div class="aoi-banner" id="aoi-banner">
-        <span class="aoi-label">Current AOI:</span>
-        <span id="aoi-display" class="aoi-value">None</span>
+        <span class="aoi-label">Area:</span>
+        <span id="aoi-display" class="aoi-value">not set yet</span>
       </div>
 
       <!-- Messages Transcript -->
-      <div class="chat-transcript" id="chat-transcript">
-        <div class="system-bubble welcome-msg">
-          <strong>Welcome to GeoAgent.</strong> Ask for spatial data by place name, or drop a <code>.geojson</code> file to set your Area of Interest.
-        </div>
+      <div class="chat-transcript" id="chat-transcript" role="log" aria-live="polite" aria-relevant="additions" tabindex="0">
       </div>
 
       <!-- Input Bar -->
@@ -41,56 +39,51 @@
             <textarea
               id="prompt-input"
               rows="2"
-              placeholder="e.g. 'Get me the boundary of Central Park' or 'Now the buildings and roads'..."
+              placeholder="e.g. 'Get the boundary of Central Park' or 'Buildings and roads'..."
+              aria-label="Describe the area or data you want"
               required
             ></textarea>
             <button type="submit" id="btn-send" class="btn-primary">Send</button>
           </div>
+          <div class="input-hint">Enter to send, Shift+Enter for new line</div>
         </form>
-        <div class="upload-row">
-          <label class="btn-secondary upload-btn">
-            Upload AOI (.geojson)
-            <input type="file" id="aoi-file-input" accept=".geojson,application/geo+json,application/json" />
-          </label>
-          <span id="upload-status" class="status-hint"></span>
-        </div>
       </div>
     </aside>
 
-    <!-- Right Pane: Map (Top) and Timeline / Artifacts (Bottom) -->
+    <!-- Right Pane: Map (Top) and Timeline / Files (Bottom) -->
     <main class="right-pane">
       <div class="map-container" id="map-container">
-        <div id="map"></div>
-        <div class="map-overlay-info" id="map-info">No layers loaded</div>
+        <div id="map" role="region" aria-label="Map of results"></div>
+        <div class="map-overlay-info" id="map-info" role="status">No layers loaded</div>
       </div>
 
       <div class="activity-container">
         <!-- Live Timeline -->
-        <section class="activity-section">
+        <section class="activity-section" aria-labelledby="heading-progress">
           <div class="section-header">
-            <h3>Live Progress</h3>
-            <span id="task-status-badge" class="badge badge-neutral">Idle</span>
+            <h2 id="heading-progress">Live Progress</h2>
+            <span id="task-status-badge" class="badge badge-neutral" role="status">Idle</span>
           </div>
-          <div class="timeline" id="timeline">
-            <div class="timeline-empty">Waiting for a request...</div>
+          <div class="timeline" id="timeline" tabindex="0" role="region" aria-label="Task progress">
+            <div class="timeline-empty">Nothing running</div>
           </div>
         </section>
 
         <!-- Artifact List -->
-        <section class="activity-section">
+        <section class="activity-section" aria-labelledby="heading-files">
           <div class="section-header">
-            <h3>Artifacts & Downloads</h3>
+            <h2 id="heading-files">Files</h2>
             <span id="artifact-count-badge" class="badge badge-neutral">0 files</span>
           </div>
-          <div class="artifact-list" id="artifact-list">
-            <div class="artifacts-empty">Generated GIS files will appear here.</div>
+          <div class="artifact-list" id="artifact-list" tabindex="0" role="region" aria-label="Generated files">
+            <div class="artifacts-empty">Files you can download will appear here.</div>
           </div>
         </section>
       </div>
     </main>
   </div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
