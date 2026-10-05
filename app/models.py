@@ -4,15 +4,18 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 def utc_now() -> datetime:
@@ -38,19 +41,6 @@ class Session(Base):
     aoi_area_km2: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
-    messages: Mapped[list["Message"]] = relationship(
-        "Message",
-        back_populates="session",
-        cascade="all, delete-orphan",
-        order_by="Message.created_at",
-    )
-    tasks: Mapped[list["Task"]] = relationship(
-        "Task",
-        back_populates="session",
-        cascade="all, delete-orphan",
-        order_by="Task.created_at",
-    )
-
 
 class Message(Base):
     __tablename__ = "messages"
@@ -64,8 +54,9 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
-    session: Mapped["Session"] = relationship("Session", back_populates="messages")
-    task: Mapped["Task | None"] = relationship("Task")
+    __table_args__ = (
+        CheckConstraint("role IN ('user', 'assistant', 'system')", name="ck_messages_role"),
+    )
 
 
 class Task(Base):
@@ -80,15 +71,17 @@ class Task(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    session: Mapped["Session"] = relationship("Session", back_populates="tasks")
-    events: Mapped[list["TaskEvent"]] = relationship(
-        "TaskEvent", back_populates="task", cascade="all, delete-orphan", order_by="TaskEvent.seq"
-    )
-    artifacts: Mapped[list["Artifact"]] = relationship(
-        "Artifact",
-        back_populates="task",
-        cascade="all, delete-orphan",
-        order_by="Artifact.created_at",
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed')",
+            name="ck_tasks_status",
+        ),
+        Index(
+            "uq_active_task_per_session",
+            "session_id",
+            unique=True,
+            sqlite_where=text("status IN ('queued', 'running')"),
+        ),
     )
 
 
@@ -103,9 +96,13 @@ class TaskEvent(Base):
     message: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
-    task: Mapped["Task"] = relationship("Task", back_populates="events")
-
-    __table_args__ = (UniqueConstraint("task_id", "seq", name="uq_task_events_task_id_seq"),)
+    __table_args__ = (
+        UniqueConstraint("task_id", "seq", name="uq_task_events_task_id_seq"),
+        CheckConstraint(
+            "stage IN ('starting', 'geocoding', 'vector', 'raster', 'done', 'error')",
+            name="ck_task_events_stage",
+        ),
+    )
 
 
 class Artifact(Base):
@@ -121,4 +118,4 @@ class Artifact(Base):
     meta: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
-    task: Mapped["Task"] = relationship("Task", back_populates="artifacts")
+    __table_args__ = (CheckConstraint("kind IN ('vector', 'raster')", name="ck_artifacts_kind"),)
