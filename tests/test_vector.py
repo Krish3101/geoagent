@@ -3,7 +3,7 @@ from typing import get_args
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import Polygon, box
+from shapely.geometry import Polygon
 
 from app.geo import vector
 
@@ -49,19 +49,19 @@ def test_area_guard_exempts_boundary(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(vector.ox, "features_from_polygon", fail)
 
-    artifacts = vector.extract_vector_layer(large_aoi, "boundary", tmp_path, "huge_region")
-    assert len(artifacts) == 2  # geojson and gpkg
-    assert artifacts[0]["meta"]["feature_count"] == 1
+    artifact = vector.extract_vector_layer(large_aoi, "boundary", tmp_path, "huge_region")
+    assert artifact.meta["feature_count"] == 1
+    assert artifact.filename.endswith(".geojson")
 
     gdf = gpd.read_file(tmp_path / "huge_region_boundary.geojson")
     assert gdf.iloc[0]["name"] == "Huge Region"
     assert gdf.geometry.iloc[0].equals(Polygon([[-100, 30], [-90, 30], [-90, 40], [-100, 40]]))
 
 
-def test_object_dtype_stringified_in_gpkg(tmp_path: Path, monkeypatch):
+def test_feature_count_limit_trips_above_200k(tmp_path: Path, monkeypatch):
     aoi = {
-        "name": "Small Park",
-        "area_km2": 2.0,
+        "name": "Dense City",
+        "area_km2": 50.0,
         "bbox": [0, 0, 1, 1],
         "geometry": {
             "type": "Polygon",
@@ -69,23 +69,23 @@ def test_object_dtype_stringified_in_gpkg(tmp_path: Path, monkeypatch):
         },
     }
 
-    # Dataframe with object dtype containing Python lists/dicts (which causes fiona GPKG issues)
-    mock_gdf = gpd.GeoDataFrame(
-        [
-            {
-                "geometry": box(0.1, 0.1, 0.2, 0.2),
-                "tags_dict": {"foo": "bar"},
-                "list_col": [1, 2, 3],
-            }
-        ],
-        crs="EPSG:4326",
-    )
-    monkeypatch.setattr(vector.ox, "features_from_polygon", lambda poly, tags: mock_gdf)
+    class FakeHugeGDF(list):
+        def __init__(self):
+            super().__init__([None] * 200_001)
+            self.empty = False
+            self.crs = "EPSG:4326"
 
-    vector.extract_vector_layer(aoi, "buildings", tmp_path, "small_park")
+        def __len__(self):
+            return 200_001
 
-    # Read written GPKG back and verify it succeeded without crash
-    gpkg_file = tmp_path / "small_park_buildings.gpkg"
-    read_gdf = gpd.read_file(gpkg_file)
-    assert len(read_gdf) == 1
-    assert isinstance(read_gdf["tags_dict"].iloc[0], str)
+    monkeypatch.setattr(vector.ox, "features_from_polygon", lambda *args, **kwargs: FakeHugeGDF())
+
+    with pytest.raises(ValueError, match="exceeding the limit of 200,000"):
+        vector.extract_vector_layer(aoi, "buildings", tmp_path, "dense")
+
+
+def test_overpass_url_setting_reaches_osmnx(monkeypatch):
+    monkeypatch.setattr(vector.ox.settings, "overpass_url", vector.ox.settings.overpass_url)
+    monkeypatch.setattr(vector.settings, "overpass_url", "https://overpass.example/api")
+    vector._configure_osmnx()
+    assert vector.ox.settings.overpass_url == "https://overpass.example/api"

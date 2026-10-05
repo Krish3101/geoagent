@@ -45,12 +45,12 @@ async def test_geocode_hit_and_bbox_conversion(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
 
     res = await geocode.geocode("Central Park")
-    assert res["name"] == "Central Park, Manhattan, New York, USA"
-    assert res["source"] == "geocoded"
+    assert res.name == "Central Park, Manhattan, New York, USA"
+    assert res.source == "geocoded"
     # minx, miny, maxx, maxy
-    assert res["bbox"] == [-73.9819, 40.7648, -73.9498, 40.7968]
-    assert res["area_km2"] > 0
-    assert res["geometry"]["type"] in ("Polygon", "MultiPolygon")
+    assert res.bbox == [-73.9819, 40.7648, -73.9498, 40.7968]
+    assert res.area_km2 > 0
+    assert res.geometry["type"] in ("Polygon", "MultiPolygon")
 
 
 @pytest.mark.asyncio

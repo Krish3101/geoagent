@@ -3,10 +3,12 @@ from typing import Any, Literal
 
 import geopandas as gpd
 import osmnx as ox
+import requests
 import shapely.geometry
 from shapely.validation import make_valid
 
 from app.config import settings
+from app.geo.types import GeoArtifact
 
 Layer = Literal[
     "boundary",
@@ -28,17 +30,28 @@ LAYER_TAG_MAP: dict[str, dict[str, Any]] = {
 }
 
 
+def _configure_osmnx() -> None:
+    ox.settings.http_user_agent = settings.nominatim_user_agent
+    ox.settings.cache_folder = settings.data_dir / "osm_cache"
+    ox.settings.requests_timeout = 60
+    if settings.overpass_url:
+        ox.settings.overpass_url = settings.overpass_url
+
+
 def extract_vector_layer(
     aoi: dict[str, Any],
     layer: str,
     output_dir: Path,
     slug: str,
-) -> list[dict[str, Any]]:
-    """Extract a single OSM vector layer for an AOI and export GeoJSON + GPKG.
+    task_id: str = "",
+) -> GeoArtifact:
+    """Extract a single OSM vector layer for an AOI and export GeoJSON only.
 
     "boundary" is the outline of the place itself, as geocoded. Every other layer is what
     OpenStreetMap has inside that outline.
     """
+    _configure_osmnx()
+
     if layer != "boundary" and layer not in LAYER_TAG_MAP:
         valid = ["boundary", *LAYER_TAG_MAP]
         raise ValueError(f"Unknown layer '{layer}'. Must be one of {valid}")
@@ -59,22 +72,35 @@ def extract_vector_layer(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     geojson_path = output_dir / f"{slug}_{layer}.geojson"
-    gpkg_path = output_dir / f"{slug}_{layer}.gpkg"
 
     if layer == "boundary":
         gdf = gpd.GeoDataFrame({"name": [aoi.get("name")]}, geometry=[polygon], crs="EPSG:4326")
     else:
         try:
             gdf = ox.features_from_polygon(polygon, LAYER_TAG_MAP[layer])
-        except Exception as e:
+        except (
+            ox._errors.InsufficientResponseError,
+            ox._errors.ResponseStatusCodeError,
+            requests.exceptions.RequestException,
+            ValueError,
+            RuntimeError,
+        ) as e:
             # If no elements are found, OSMnx may raise or return empty
-            if "No data elements in server response" in str(e) or "empty" in str(e).lower():
+            err_msg = str(e).lower()
+            if "no data elements" in err_msg or "empty" in err_msg:
                 gdf = gpd.GeoDataFrame(columns=["geometry"], crs="EPSG:4326")
             else:
                 raise RuntimeError(f"Overpass extraction failed for layer '{layer}': {e}") from e
 
     if gdf is None or gdf.empty:
         gdf = gpd.GeoDataFrame(columns=["geometry"], crs="EPSG:4326")
+
+    # Feature count limit to avoid out-of-memory and browser freeze
+    if len(gdf) > 200_000:
+        raise ValueError(
+            f"Layer '{layer}' returned {len(gdf):,} features, exceeding the limit of 200,000. "
+            "Please narrow your area of interest."
+        )
 
     # Ensure CRS is EPSG:4326
     if gdf.crs is None:
@@ -94,43 +120,18 @@ def extract_vector_layer(
 
     gdf.to_file(geojson_path, driver="GeoJSON")
 
-    # Stringify complex object-dtype columns (lists, dicts) before GeoPackage write
-    gpkg_gdf = gdf.copy()
-    for col in gpkg_gdf.columns:
-        if col != "geometry" and gpkg_gdf[col].dtype == "object":
-            gpkg_gdf[col] = gpkg_gdf[col].apply(
-                lambda val: str(val) if isinstance(val, (dict, list, set, tuple)) else val
-            )
+    rel_path = f"runs/{task_id}/vector/{geojson_path.name}" if task_id else geojson_path.name
 
-    gpkg_gdf.to_file(gpkg_path, driver="GPKG")
-
-    artifacts = [
-        {
-            "kind": "vector",
-            "filename": geojson_path.name,
-            "filepath": geojson_path,
-            "size_bytes": geojson_path.stat().st_size,
-            "bounds": bounds,
-            "meta": {
-                "layer": layer,
-                "feature_count": feature_count,
-                "crs": "EPSG:4326",
-                "format": "geojson",
-            },
+    return GeoArtifact(
+        kind="vector",
+        filename=geojson_path.name,
+        relative_path=rel_path,
+        size_bytes=geojson_path.stat().st_size,
+        bounds=bounds,
+        meta={
+            "layer": layer,
+            "feature_count": feature_count,
+            "crs": "EPSG:4326",
+            "format": "geojson",
         },
-        {
-            "kind": "vector",
-            "filename": gpkg_path.name,
-            "filepath": gpkg_path,
-            "size_bytes": gpkg_path.stat().st_size,
-            "bounds": bounds,
-            "meta": {
-                "layer": layer,
-                "feature_count": feature_count,
-                "crs": "EPSG:4326",
-                "format": "gpkg",
-            },
-        },
-    ]
-
-    return artifacts
+    )
