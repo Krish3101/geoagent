@@ -1,31 +1,63 @@
-# Python
+# Python Bytecode & Packaging
 __pycache__/
-*.pyc
-*.pyo
-*.egg-info/
+*.py[cod]
+*$py.class
+*.so
+.Python
 dist/
 build/
+*.egg-info/
 
-# Virtual environment
+# Virtual Environments
 .venv/
+venv/
+env/
+ENV/
 
-# Environment variables
-.env
-
-# Data (database + generated artifacts)
-data/
-
-# Tool caches
+# Tool Caches & Test Coverage
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 cache/
+.coverage
+.coverage.*
+coverage/
+htmlcov/
 
-# OS junk
-.DS_Store
-Thumbs.db
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
 
-# Editor
+# Data & SQLite Databases
+data/
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# IDE & Editors
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
