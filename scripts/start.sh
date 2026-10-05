@@ -14,11 +14,12 @@ if [ ! -f .env ]; then
     cp .env.example .env
 fi
 
-if ! grep -qE '^OPENROUTER_API_KEY=.+' .env; then
+if [ -z "$OPENROUTER_API_KEY" ] && ! grep -qE '^OPENROUTER_API_KEY=.+' .env; then
     echo "Warning: OPENROUTER_API_KEY is empty in .env, so the agent can't answer yet."
     echo "Get a free key at https://openrouter.ai/keys and add it there."
 fi
 
-uv sync
-echo "Starting GeoAgent on http://localhost:8000"
-exec uv run uvicorn app.main:app --reload --port 8000
+PORT="${PORT:-8000}"
+uv sync --locked
+echo "Starting GeoAgent on http://127.0.0.1:${PORT}"
+exec uv run uvicorn app.main:app --host 127.0.0.1 --port "$PORT"
