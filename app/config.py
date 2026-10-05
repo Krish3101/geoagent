@@ -13,12 +13,17 @@ class Settings(BaseSettings):
 
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
     llm_base_url: str = Field(default="https://openrouter.ai/api/v1", alias="LLM_BASE_URL")
+    model_name: str = Field(default="nvidia/nemotron-3-super-120b-a12b:free", alias="MODEL")
     data_dir: Path = Field(default=Path("./data"), alias="DATA_DIR")
     nominatim_user_agent: str = Field(
-        default="geoagent/1.0 (dev@localhost)", alias="NOMINATIM_USER_AGENT"
+        default="geoagent/1.0 (+https://github.com/Krish3101/geoagent)",
+        alias="NOMINATIM_USER_AGENT",
     )
+    # empty means OSMnx's default (overpass-api.de)
+    overpass_url: str = Field(default="", alias="OVERPASS_URL")
     vector_max_area_km2: float = Field(default=750.0, alias="VECTOR_MAX_AREA_KM2")
-    raster_max_pixels: int = Field(default=40_000_000, alias="RASTER_MAX_PIXELS")
+    raster_max_pixels: int = Field(default=25_000_000, alias="RASTER_MAX_PIXELS")
+    task_timeout_s: int = Field(default=300, alias="TASK_TIMEOUT_S")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     @property

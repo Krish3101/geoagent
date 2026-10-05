@@ -6,26 +6,20 @@ from pydantic import BaseModel, Field
 
 class AOISchema(BaseModel):
     name: str
-    source: str  # geocoded | uploaded | derived
+    source: str  # geocoded | derived
     area_km2: float
     bbox: list[float]  # [minx, miny, maxx, maxy]
     geometry: dict[str, Any]
 
 
-class SessionCreateResponse(BaseModel):
-    id: str
-    aoi: AOISchema | None = None
-    created_at: datetime
-
-
-class SessionDetailResponse(BaseModel):
+class SessionResponse(BaseModel):
     id: str
     aoi: AOISchema | None = None
     created_at: datetime
 
 
 class MessageCreateRequest(BaseModel):
-    content: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1, max_length=2000)
 
 
 class MessageCreateResponse(BaseModel):
@@ -39,6 +33,7 @@ class MessageResponse(BaseModel):
     id: str
     session_id: str
     task_id: str | None = None
+    task_status: str | None = None
     role: str
     content: str
     created_at: datetime
@@ -57,13 +52,9 @@ class TaskResponse(BaseModel):
 
 class ArtifactItem(BaseModel):
     id: str
+    kind: str
     filename: str
     size_bytes: int
     bounds: list[float]
     meta: dict[str, Any]
     download_url: str
-
-
-class ArtifactGroupedResponse(BaseModel):
-    vector: list[ArtifactItem] = Field(default_factory=list)
-    raster: list[ArtifactItem] = Field(default_factory=list)

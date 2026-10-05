@@ -36,18 +36,22 @@ async def test_artifact_row_and_download(client: AsyncClient, test_env):
         artifact_id = art.id
         task_id = t.id
 
-    # List artifacts
+    # List artifacts (flat list)
     list_res = await client.get(f"/api/tasks/{task_id}/artifacts")
     assert list_res.status_code == 200
     data = list_res.json()
-    assert len(data["vector"]) == 1
-    assert data["vector"][0]["id"] == artifact_id
-    assert data["vector"][0]["filename"] == "test_data.geojson"
+    assert isinstance(data, list)
+    assert len(data) == 1
+    assert data[0]["id"] == artifact_id
+    assert data[0]["filename"] == "test_data.geojson"
+    assert data[0]["kind"] == "vector"
 
     # Download artifact
     dl_res = await client.get(f"/api/artifacts/{artifact_id}/download")
     assert dl_res.status_code == 200
     assert dl_res.content == b'{"type": "FeatureCollection", "features": []}'
+    assert dl_res.headers.get("x-content-type-options") == "nosniff"
+    assert "application/geo+json" in dl_res.headers.get("content-type", "")
 
 
 @pytest.mark.asyncio

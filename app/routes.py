@@ -1,49 +1,53 @@
 import asyncio
-import json
 from typing import Any
 
-import shapely.geometry
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
-from shapely.validation import make_valid
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db import get_db
-from app.geo.geocode import compute_geodesic_area_km2
-from app.models import Artifact, Message, Session, Task, TaskEvent
-from app.runner import STATUS_FAILED, STATUS_QUEUED, STATUS_SUCCEEDED, run_task
+from app.db import SessionLocal, get_db
+from app.models import Artifact, Message, Session, Task
 from app.schemas import (
     AOISchema,
-    ArtifactGroupedResponse,
     ArtifactItem,
     MessageCreateRequest,
     MessageCreateResponse,
     MessageResponse,
-    SessionCreateResponse,
-    SessionDetailResponse,
+    SessionResponse,
     TaskResponse,
 )
+from app.sse import event_generator
+from app.tasks.runner import run_task
+from app.tasks.state import STATUS_QUEUED
 
 router = APIRouter(prefix="/api")
 _background_tasks: set[asyncio.Task[Any]] = set()
 
+MIME_TYPES = {
+    ".geojson": "application/geo+json",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".png": "image/png",
+}
 
-@router.post("/sessions", response_model=SessionCreateResponse, status_code=201)
+
+@router.post("/sessions", response_model=SessionResponse, status_code=201)
 async def create_session(db: AsyncSession = Depends(get_db)):
     session = Session()
     db.add(session)
     await db.commit()
     await db.refresh(session)
-    return SessionCreateResponse(
+    return SessionResponse(
         id=session.id,
         aoi=None,
         created_at=session.created_at,
     )
 
 
-@router.get("/sessions/{sid}", response_model=SessionDetailResponse)
+@router.get("/sessions/{sid}", response_model=SessionResponse)
 async def get_session(sid: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Session).where(Session.id == sid))
     session = result.scalar_one_or_none()
@@ -60,7 +64,7 @@ async def get_session(sid: str, db: AsyncSession = Depends(get_db)):
             geometry=session.aoi_geometry,
         )
 
-    return SessionDetailResponse(
+    return SessionResponse(
         id=session.id,
         aoi=aoi,
         created_at=session.created_at,
@@ -74,18 +78,25 @@ async def get_messages(sid: str, db: AsyncSession = Depends(get_db)):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    stmt = select(Message).where(Message.session_id == sid).order_by(Message.created_at.asc())
-    messages = (await db.execute(stmt)).scalars().all()
+    # the task status lets the page show replies of failed tasks as errors
+    stmt = (
+        select(Message, Task.status)
+        .outerjoin(Task, Message.task_id == Task.id)
+        .where(Message.session_id == sid)
+        .order_by(Message.created_at.asc())
+    )
+    rows = (await db.execute(stmt)).all()
     return [
         MessageResponse(
             id=m.id,
             session_id=m.session_id,
             task_id=m.task_id,
+            task_status=status,
             role=m.role,
             content=m.content,
             created_at=m.created_at,
         )
-        for m in messages
+        for m, status in rows
     ]
 
 
@@ -100,22 +111,21 @@ async def submit_message(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    task = Task(
-        session_id=sid,
-        status=STATUS_QUEUED,
-        prompt=payload.content,
-    )
+    # One active task per session. The partial unique index on tasks enforces it, so two
+    # requests that arrive together can't both get in; the loser gets a 409.
+    task = Task(session_id=sid, status=STATUS_QUEUED, prompt=payload.content)
     db.add(task)
-    await db.flush()
-
-    message = Message(
-        session_id=sid,
-        task_id=task.id,
-        role="user",
-        content=payload.content,
-    )
-    db.add(message)
-    await db.commit()
+    try:
+        await db.flush()
+        message = Message(session_id=sid, task_id=task.id, role="user", content=payload.content)
+        db.add(message)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A task is already running for this session. Please wait for it to finish.",
+        )
 
     background_task = asyncio.create_task(run_task(task.id))
     _background_tasks.add(background_task)
@@ -126,117 +136,6 @@ async def submit_message(
         message_id=message.id,
         status=STATUS_QUEUED,
         events_url=f"/api/tasks/{task.id}/events",
-    )
-
-
-def validate_coords_wgs84(coords: Any) -> None:
-    """Recursively validate that all coordinates are within WGS84 range."""
-    if not isinstance(coords, (list, tuple)):
-        return
-    is_num_pair = (
-        len(coords) >= 2
-        and isinstance(coords[0], (int, float))
-        and isinstance(coords[1], (int, float))
-    )
-    if is_num_pair:
-        lon, lat = float(coords[0]), float(coords[1])
-        if not (-180.0 <= lon <= 180.0) or not (-90.0 <= lat <= 90.0):
-            raise ValueError(f"Coordinate [{lon}, {lat}] is out of WGS84 range")
-    else:
-        for item in coords:
-            validate_coords_wgs84(item)
-
-
-@router.put("/sessions/{sid}/aoi", response_model=AOISchema, status_code=200)
-async def upload_aoi(
-    sid: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(select(Session).where(Session.id == sid))
-    session = result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    try:
-        body = await request.json()
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {e}")
-
-    if not body or not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="Payload must be a GeoJSON object")
-
-    try:
-        geom_type = body.get("type")
-        features_list = []
-
-        if geom_type == "FeatureCollection":
-            raw_features = body.get("features")
-            if not raw_features or not isinstance(raw_features, list):
-                raise ValueError("FeatureCollection must contain features")
-            for feat in raw_features:
-                if not isinstance(feat, dict) or not feat.get("geometry"):
-                    raise ValueError("Invalid feature in FeatureCollection")
-                validate_coords_wgs84(feat["geometry"].get("coordinates"))
-                features_list.append(feat["geometry"])
-        elif geom_type == "Feature":
-            geom = body.get("geometry")
-            if not geom or not isinstance(geom, dict):
-                raise ValueError("Feature must have geometry")
-            validate_coords_wgs84(geom.get("coordinates"))
-            features_list.append(geom)
-        elif geom_type in ("Polygon", "MultiPolygon"):
-            validate_coords_wgs84(body.get("coordinates"))
-            features_list.append(body)
-        else:
-            raise ValueError(f"Unsupported GeoJSON type: {geom_type}")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    try:
-        shapely_geoms = [shapely.geometry.shape(g) for g in features_list]
-        shapely_geoms = [make_valid(g) for g in shapely_geoms if not g.is_empty]
-        if not shapely_geoms:
-            raise ValueError("No valid geometry found in GeoJSON")
-
-        if len(shapely_geoms) == 1:
-            combined = shapely_geoms[0]
-        else:
-            combined = shapely.unary_union(shapely_geoms)
-            combined = make_valid(combined)
-
-        if combined.is_empty:
-            raise ValueError("Resulting geometry is empty")
-        # Points and lines have no area to search inside.
-        if combined.geom_type not in ("Polygon", "MultiPolygon"):
-            raise ValueError("Upload a polygon; points and lines have no area to search")
-
-        bbox = [round(b, 6) for b in combined.bounds]
-        area_km2 = compute_geodesic_area_km2(combined)
-        geom_mapping = shapely.geometry.mapping(combined)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid geometry: {e}")
-
-    session.aoi_name = "Uploaded area"
-    session.aoi_source = "uploaded"
-    session.aoi_geometry = geom_mapping
-    session.aoi_bbox = bbox
-    session.aoi_area_km2 = area_km2
-
-    system_msg = Message(
-        session_id=sid,
-        role="system",
-        content=f"Area of interest updated to Uploaded area ({area_km2} km²)",
-    )
-    db.add(system_msg)
-    await db.commit()
-
-    return AOISchema(
-        name=session.aoi_name,
-        source=session.aoi_source,
-        area_km2=session.aoi_area_km2,
-        bbox=session.aoi_bbox,
-        geometry=session.aoi_geometry,
     )
 
 
@@ -267,55 +166,22 @@ async def get_task_events(
     tid: str,
     request: Request,
     after_seq: int = Query(default=0, ge=0),
-    db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Task).where(Task.id == tid))
-    task = result.scalar_one_or_none()
-    if not task:
+    # No Depends(get_db) here: it would hold a pooled connection for the whole stream.
+    async with SessionLocal() as db:
+        found = (await db.execute(select(Task.id).where(Task.id == tid))).scalar_one_or_none()
+    if not found:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    async def event_generator():
-        last_seq = after_seq
-        terminal_stages = {"done", "error"}
-
-        while True:
-            if await request.is_disconnected():
-                break
-
-            stmt = (
-                select(TaskEvent)
-                .where(TaskEvent.task_id == tid, TaskEvent.seq > last_seq)
-                .order_by(TaskEvent.seq.asc())
-            )
-            events = (await db.execute(stmt)).scalars().all()
-
-            reached_terminal = False
-            for ev in events:
-                last_seq = ev.seq
-                data = {
-                    "seq": ev.seq,
-                    "stage": ev.stage,
-                    "message": ev.message,
-                    "created_at": ev.created_at.isoformat(),
-                }
-                yield f"data: {json.dumps(data)}\n\n"
-                if ev.stage in terminal_stages:
-                    reached_terminal = True
-
-            if reached_terminal:
-                break
-
-            # Check task status in DB
-            task_chk = await db.execute(select(Task.status).where(Task.id == tid))
-            curr_status = task_chk.scalar_one_or_none()
-            if curr_status in (STATUS_SUCCEEDED, STATUS_FAILED) and not events:
-                # If task is finished and no more events exist, close stream
-                break
-
-            await asyncio.sleep(0.5)
+    # EventSource sends Last-Event-ID when it reconnects
+    last_event_id = request.headers.get("Last-Event-ID")
+    if last_event_id and last_event_id.isdigit():
+        seq_start = int(last_event_id)
+    else:
+        seq_start = after_seq
 
     return StreamingResponse(
-        event_generator(),
+        event_generator(tid, request, after_seq=seq_start),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -325,31 +191,27 @@ async def get_task_events(
     )
 
 
-@router.get("/tasks/{tid}/artifacts", response_model=ArtifactGroupedResponse)
+@router.get("/tasks/{tid}/artifacts", response_model=list[ArtifactItem])
 async def get_task_artifacts(tid: str, db: AsyncSession = Depends(get_db)):
-    task_res = await db.execute(select(Task).where(Task.id == tid))
+    task_res = await db.execute(select(Task.id).where(Task.id == tid))
     if not task_res.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Task not found")
 
     stmt = select(Artifact).where(Artifact.task_id == tid).order_by(Artifact.created_at.asc())
     artifacts = (await db.execute(stmt)).scalars().all()
 
-    grouped = ArtifactGroupedResponse()
-    for art in artifacts:
-        item = ArtifactItem(
+    return [
+        ArtifactItem(
             id=art.id,
+            kind=art.kind,
             filename=art.filename,
             size_bytes=art.size_bytes,
             bounds=art.bounds,
             meta=art.meta,
             download_url=f"/api/artifacts/{art.id}/download",
         )
-        if art.kind == "vector":
-            grouped.vector.append(item)
-        elif art.kind == "raster":
-            grouped.raster.append(item)
-
-    return grouped
+        for art in artifacts
+    ]
 
 
 @router.get("/artifacts/{aid}/download")
@@ -374,10 +236,10 @@ async def download_artifact(aid: str, db: AsyncSession = Depends(get_db)):
     if not target_path.is_file():
         raise HTTPException(status_code=404, detail="File not found on disk")
 
-    is_geojson = target_path.suffix == ".geojson"
-    media_type = "application/geo+json" if is_geojson else "application/octet-stream"
+    media_type = MIME_TYPES.get(target_path.suffix.lower(), "application/octet-stream")
     return FileResponse(
         path=target_path,
         filename=artifact.filename,
         media_type=media_type,
+        headers={"X-Content-Type-Options": "nosniff"},
     )

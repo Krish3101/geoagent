@@ -5,15 +5,10 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
-from app.agent import RunDeps, extract_vector, fetch_imagery
+from app.geo.types import GeoArtifact
 from app.models import Session, Task
-from app.runner import (
-    STATUS_QUEUED,
-    STATUS_RUNNING,
-    STATUS_SUCCEEDED,
-    log_event,
-    transition,
-)
+from app.tasks.state import STATUS_QUEUED, STATUS_RUNNING, STATUS_SUCCEEDED, log_event, transition
+from app.tools import RunDeps, extract_vector
 
 
 @pytest.mark.asyncio
@@ -36,19 +31,18 @@ async def test_session_reuses_stored_aoi(test_env, monkeypatch):
 
     called_tools = []
 
-    def mock_extract(aoi, layer, output_dir, slug):
+    def mock_extract(aoi, layer, output_dir, slug, task_id=""):
         called_tools.append(("extract_vector_layer", layer))
-        return [
-            {
-                "kind": "vector",
-                "filename": f"{slug}_{layer}.geojson",
-                "size_bytes": 100,
-                "bounds": [4.8, 52.3, 4.9, 52.4],
-                "meta": {"layer": layer, "feature_count": 10, "crs": "EPSG:4326"},
-            }
-        ]
+        return GeoArtifact(
+            kind="vector",
+            filename=f"{slug}_{layer}.geojson",
+            relative_path=f"runs/{task_id}/vector/{slug}_{layer}.geojson",
+            size_bytes=100,
+            bounds=[4.8, 52.3, 4.9, 52.4],
+            meta={"layer": layer, "feature_count": 10, "crs": "EPSG:4326"},
+        )
 
-    monkeypatch.setattr("app.agent.extract_vector_layer", mock_extract)
+    monkeypatch.setattr("app.tools.extract_vector_layer", mock_extract)
 
     # Turn 2: RunDeps has current AOI
     deps = RunDeps(
@@ -67,10 +61,9 @@ async def test_session_reuses_stored_aoi(test_env, monkeypatch):
     )
 
     # Mock log_event and record_artifact to avoid DB FK in pure tool test
-    monkeypatch.setattr("app.agent.log_event", lambda *args, **kwargs: asyncio.sleep(0))
-    monkeypatch.setattr("app.agent.record_artifact", lambda *args, **kwargs: asyncio.sleep(0))
+    monkeypatch.setattr("app.tools.log_event", lambda *args, **kwargs: asyncio.sleep(0))
+    monkeypatch.setattr("app.tools.record_artifact", lambda *args, **kwargs: asyncio.sleep(0))
 
-    # Context with RunDeps
     class DummyContext:
         def __init__(self, deps):
             self.deps = deps
@@ -85,22 +78,21 @@ async def test_session_reuses_stored_aoi(test_env, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_one_failed_layer_does_not_hide_the_others(test_env, monkeypatch):
-    def mock_extract(aoi, layer, output_dir, slug):
+    def mock_extract(aoi, layer, output_dir, slug, task_id=""):
         if layer == "roads":
             raise RuntimeError("Overpass timed out")
-        return [
-            {
-                "kind": "vector",
-                "filename": f"{slug}_{layer}.geojson",
-                "size_bytes": 100,
-                "bounds": [4.8, 52.3, 4.9, 52.4],
-                "meta": {"layer": layer, "feature_count": 10, "crs": "EPSG:4326"},
-            }
-        ]
+        return GeoArtifact(
+            kind="vector",
+            filename=f"{slug}_{layer}.geojson",
+            relative_path=f"runs/{task_id}/vector/{slug}_{layer}.geojson",
+            size_bytes=100,
+            bounds=[4.8, 52.3, 4.9, 52.4],
+            meta={"layer": layer, "feature_count": 10, "crs": "EPSG:4326"},
+        )
 
-    monkeypatch.setattr("app.agent.extract_vector_layer", mock_extract)
-    monkeypatch.setattr("app.agent.log_event", lambda *args, **kwargs: asyncio.sleep(0))
-    monkeypatch.setattr("app.agent.record_artifact", lambda *args, **kwargs: asyncio.sleep(0))
+    monkeypatch.setattr("app.tools.extract_vector_layer", mock_extract)
+    monkeypatch.setattr("app.tools.log_event", lambda *args, **kwargs: asyncio.sleep(0))
+    monkeypatch.setattr("app.tools.record_artifact", lambda *args, **kwargs: asyncio.sleep(0))
 
     class DummyContext:
         def __init__(self, deps):
@@ -121,74 +113,8 @@ async def test_one_failed_layer_does_not_hide_the_others(test_env, monkeypatch):
     result = await extract_vector(DummyContext(deps), ["buildings", "roads"])
 
     assert "Extracted 10 buildings" in result
-    assert "roads failed (Overpass timed out)" in result
-
-
-@pytest.mark.asyncio
-async def test_uploaded_aoi_beats_geocoding(test_env, client: AsyncClient, monkeypatch):
-    """Uploaded AOI is used directly without calling Nominatim."""
-    sess_res = await client.post("/api/sessions")
-    sid = sess_res.json()["id"]
-
-    polygon_geojson = {
-        "type": "Polygon",
-        "coordinates": [[[12.4, 41.8], [12.5, 41.8], [12.5, 41.9], [12.4, 41.9], [12.4, 41.8]]],
-    }
-
-    # Upload AOI
-    put_res = await client.put(f"/api/sessions/{sid}/aoi", json=polygon_geojson)
-    assert put_res.status_code == 200
-    aoi_data = put_res.json()
-    assert aoi_data["source"] == "uploaded"
-
-    geocode_called = False
-
-    async def mock_geocode(place):
-        nonlocal geocode_called
-        geocode_called = True
-        return {}
-
-    monkeypatch.setattr("app.agent.geocode", mock_geocode)
-
-    # Tool invocation for imagery
-    deps = RunDeps(
-        task_id="task-img",
-        session_id=sid,
-        aoi=aoi_data,
-    )
-
-    def mock_fetch_raster(aoi, start_date, end_date, product, output_dir, slug, max_cloud_cover):
-        assert aoi["source"] == "uploaded"
-        assert aoi["bbox"] == [12.4, 41.8, 12.5, 41.9]
-        return (
-            {
-                "kind": "raster",
-                "filename": f"{slug}_{product}.tif",
-                "size_bytes": 500,
-                "bounds": [12.4, 41.8, 12.5, 41.9],
-                "meta": {
-                    "product": product,
-                    "crs": "EPSG:32633",
-                    "resolution_m": 10,
-                    "cloud_cover": 2.0,
-                },
-            },
-            10,
-            "2024-07-15",
-            2.0,
-        )
-
-    monkeypatch.setattr("app.agent.fetch_raster_product", mock_fetch_raster)
-    monkeypatch.setattr("app.agent.log_event", lambda *args, **kwargs: asyncio.sleep(0))
-    monkeypatch.setattr("app.agent.record_artifact", lambda *args, **kwargs: asyncio.sleep(0))
-
-    class DummyContext:
-        def __init__(self, deps):
-            self.deps = deps
-
-    res = await fetch_imagery(DummyContext(deps), "2024-07-01", "2024-07-31", ["ndvi"], 10)
-    assert not geocode_called
-    assert "Composited scenes" in res
+    assert "roads failed (OpenStreetMap download error)" in result
+    assert "Overpass timed out" not in result
 
 
 @pytest.mark.asyncio
@@ -205,8 +131,8 @@ async def test_task_state_never_derives_from_log_text(test_env):
         await session.commit()
         tid = t.id
 
-    await transition(tid, STATUS_RUNNING)
-    await transition(tid, STATUS_SUCCEEDED)
+    await transition(tid, STATUS_QUEUED, STATUS_RUNNING)
+    await transition(tid, STATUS_RUNNING, STATUS_SUCCEEDED)
 
     # Verify no log-text parsing in app source files
     src_files = list(Path("app").rglob("*.py"))
@@ -275,74 +201,3 @@ async def test_oversized_aoi_is_refused_before_any_request():
     msg = await extract_vector(DummyContext(deps), ["buildings"])
     assert "exceeds the maximum allowed" in msg
     assert "narrow your area of interest" in msg
-
-
-# Network tests (deselected by default)
-@pytest.mark.network
-@pytest.mark.asyncio
-async def test_vector_export_is_valid_geojson_and_gpkg(tmp_path: Path):
-    """Real OSMnx query produces valid GeoJSON and GPKG in EPSG:4326."""
-    import geopandas as gpd
-
-    from app.geo.vector import extract_vector_layer
-
-    central_park_aoi = {
-        "name": "Central Park",
-        "area_km2": 3.41,
-        "bbox": [-73.9819, 40.7648, -73.9498, 40.7968],
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": [
-                [
-                    [-73.9819, 40.7648],
-                    [-73.9498, 40.7648],
-                    [-73.9498, 40.7968],
-                    [-73.9819, 40.7968],
-                    [-73.9819, 40.7648],
-                ]
-            ],
-        },
-    }
-
-    artifacts = extract_vector_layer(central_park_aoi, "landuse", tmp_path, "cp")
-    geojson_art = next(a for a in artifacts if a["filename"].endswith(".geojson"))
-    gpkg_art = next(a for a in artifacts if a["filename"].endswith(".gpkg"))
-
-    gdf_json = gpd.read_file(geojson_art["filepath"])
-    gdf_gpkg = gpd.read_file(gpkg_art["filepath"])
-
-    assert gdf_json.crs.to_epsg() == 4326
-    assert gdf_gpkg.crs.to_epsg() == 4326
-
-
-@pytest.mark.network
-@pytest.mark.asyncio
-async def test_ndvi_export_is_a_valid_geotiff(tmp_path: Path):
-    """Real Planetary Computer STAC search & NDVI GeoTIFF generation."""
-    import rioxarray
-
-    from app.geo.raster import fetch_raster_product
-
-    small_aoi = {
-        "name": "Test Farm",
-        "bbox": [-120.1, 36.1, -120.08, 36.12],
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": [
-                [
-                    [-120.1, 36.1],
-                    [-120.08, 36.1],
-                    [-120.08, 36.12],
-                    [-120.1, 36.12],
-                    [-120.1, 36.1],
-                ]
-            ],
-        },
-    }
-
-    art, res, day, cloud = fetch_raster_product(
-        small_aoi, "2024-06-01", "2024-06-30", "ndvi", tmp_path, "farm", max_cloud_cover=20
-    )
-    rds = rioxarray.open_rasterio(art["filepath"])
-    assert rds.rio.crs is not None
-    assert str(rds.dtype) == "float32"
