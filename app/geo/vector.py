@@ -9,6 +9,7 @@ from shapely.validation import make_valid
 
 from app.config import settings
 from app.geo.types import GeoArtifact
+from app.geo.validity import valid_polygonal
 
 Layer = Literal[
     "boundary",
@@ -68,7 +69,13 @@ def extract_vector_layer(
     if not geom_dict:
         raise ValueError("AOI has no geometry")
 
-    polygon = make_valid(shapely.geometry.shape(geom_dict))
+    polygon = valid_polygonal(shapely.geometry.shape(geom_dict))
+    if polygon.is_empty:
+        # Degenerate outline (a line or point after repair): the bbox still bounds the place.
+        bbox = aoi.get("bbox")
+        if not bbox:
+            raise ValueError("AOI geometry has no area")
+        polygon = shapely.geometry.box(*bbox)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     geojson_path = output_dir / f"{slug}_{layer}.geojson"

@@ -141,6 +141,10 @@ async def extract_vector(
             logger.warning("task=%s layer %s failed: %s", ctx.deps.task_id, layer, e)
             failures.append(f"{layer} failed (OpenStreetMap download error)")
             continue
+        except Exception:
+            logger.exception("task=%s layer %s crashed", ctx.deps.task_id, layer)
+            failures.append(f"{layer} failed (unexpected error)")
+            continue
 
         await record_artifact(ctx.deps.task_id, art)
         summaries.append(f"{art.meta['feature_count']:,} {layer}")
@@ -199,6 +203,9 @@ async def fetch_imagery(
     except (RuntimeError, OSError) as e:
         logger.warning("task=%s imagery failed: %s", ctx.deps.task_id, e)
         return "The imagery service failed. Try again later."
+    except Exception:
+        logger.exception("task=%s imagery crashed", ctx.deps.task_id)
+        return "Imagery processing failed unexpectedly. Try a different date range or area."
 
     await record_artifact(ctx.deps.task_id, ndvi.artifact)
     await record_artifact(ctx.deps.task_id, ndvi.preview_artifact)

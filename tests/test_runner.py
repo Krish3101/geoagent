@@ -144,3 +144,33 @@ async def test_history_keeps_newest_text_and_skips_failed_replies(test_env):
     assert prompt.count("Now the roads") == 1
     assert len(prompt) < 4200
     assert deps.aoi is None
+
+
+async def test_history_cut_drops_partial_first_line(test_env):
+    factory = test_env["session_factory"]
+    async with factory() as session:
+        s = Session()
+        session.add(s)
+        await session.flush()
+        old = Task(session_id=s.id, status=STATUS_SUCCEEDED, prompt="x")
+        current = Task(session_id=s.id, status=STATUS_QUEUED, prompt="next")
+        session.add_all([old, current])
+        await session.flush()
+        t0 = datetime.now(timezone.utc)
+        for i, (role, content) in enumerate([("user", "word " * 1000), ("assistant", "tail")]):
+            session.add(
+                Message(
+                    session_id=s.id,
+                    task_id=old.id,
+                    role=role,
+                    content=content,
+                    created_at=t0 + timedelta(seconds=i),
+                )
+            )
+        await session.commit()
+        task_id = current.id
+
+    prompt, _ = await build_prompt_and_deps(task_id)
+
+    # the long first message is cut mid-text, so only whole lines remain
+    assert "Conversation transcript:\nAssistant: tail\n" in prompt

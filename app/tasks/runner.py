@@ -63,6 +63,9 @@ async def build_prompt_and_deps(task_id: str) -> tuple[str, RunDeps]:
 
         # keep the newest text if the history is long
         joined = history[-4000:]
+        if len(history) > 4000:
+            # the cut may land mid-line; drop the partial first line (keep it if it's the only one)
+            joined = joined.partition("\n")[2] or joined
         if joined:
             prompt = f"Conversation transcript:\n{joined}\n\nUser: {task.prompt}"
         else:

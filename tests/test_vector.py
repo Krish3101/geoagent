@@ -3,9 +3,10 @@ from typing import get_args
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import Polygon
+from shapely.geometry import GeometryCollection, LineString, Polygon
 
 from app.geo import vector
+from app.geo.validity import valid_polygonal
 
 
 def test_all_layers_have_tags():
@@ -89,3 +90,35 @@ def test_overpass_url_setting_reaches_osmnx(monkeypatch):
     monkeypatch.setattr(vector.settings, "overpass_url", "https://overpass.example/api")
     vector._configure_osmnx()
     assert vector.ox.settings.overpass_url == "https://overpass.example/api"
+
+
+def test_valid_polygonal_repairs_bowtie():
+    bowtie = Polygon([(0, 0), (2, 2), (2, 0), (0, 2)])
+    fixed = valid_polygonal(bowtie)
+    assert fixed.geom_type in ("Polygon", "MultiPolygon")
+    assert fixed.is_valid and fixed.area > 0
+
+
+def test_valid_polygonal_drops_lines_from_collection():
+    # a ring touching itself along an edge makes make_valid return polygon + line pieces
+    geom = GeometryCollection(
+        [Polygon([(0, 0), (1, 0), (1, 1), (0, 1)]), LineString([(2, 2), (3, 3)])]
+    )
+    fixed = valid_polygonal(geom)
+    assert fixed.geom_type == "Polygon"
+    assert fixed.area == 1
+
+
+def test_valid_polygonal_pure_line_is_empty():
+    assert valid_polygonal(LineString([(0, 0), (1, 1)])).is_empty
+
+
+def test_extract_boundary_falls_back_to_bbox_for_degenerate_geometry(tmp_path: Path):
+    aoi = {
+        "name": "Sliver",
+        "area_km2": 1.0,
+        "bbox": [0, 0, 1, 1],
+        "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 1]]},
+    }
+    art = vector.extract_vector_layer(aoi, "boundary", tmp_path, "sliver")
+    assert art.bounds == [0, 0, 1, 1]

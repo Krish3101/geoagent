@@ -4,10 +4,10 @@ import time
 import httpx
 import shapely.geometry
 from pyproj import Geod
-from shapely.validation import make_valid
 
 from app.config import settings
 from app.geo.types import GeocodeResult
+from app.geo.validity import valid_polygonal
 
 _last_nominatim_time: float = 0.0
 _nominatim_lock = asyncio.Lock()
@@ -78,7 +78,7 @@ async def geocode(place: str) -> GeocodeResult:
     if raw_geojson and raw_geojson.get("type") in ("Polygon", "MultiPolygon"):
         try:
             candidate_geom = shapely.geometry.shape(raw_geojson)
-            geom = make_valid(candidate_geom)
+            geom = valid_polygonal(candidate_geom)
         except (ValueError, TypeError, shapely.errors.GEOSException):
             geom = None
 
