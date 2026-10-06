@@ -122,3 +122,21 @@ def test_extract_boundary_falls_back_to_bbox_for_degenerate_geometry(tmp_path: P
     }
     art = vector.extract_vector_layer(aoi, "boundary", tmp_path, "sliver")
     assert art.bounds == [0, 0, 1, 1]
+
+
+def test_repeated_extraction_does_not_overwrite_earlier_file(tmp_path: Path):
+    aoi = {
+        "name": "Twice",
+        "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [0, 0.01], [0.01, 0.01], [0, 0]]]},
+        "bbox": [0, 0, 0.01, 0.01],
+        "area_km2": 1.0,
+    }
+    first = vector.extract_vector_layer(
+        aoi=aoi, layer="boundary", output_dir=tmp_path, slug="twice"
+    )
+    second = vector.extract_vector_layer(
+        aoi=aoi, layer="boundary", output_dir=tmp_path, slug="twice"
+    )
+    assert first.filename == "twice_boundary.geojson"
+    assert second.filename == "twice_boundary_2.geojson"
+    assert (tmp_path / first.filename).is_file() and (tmp_path / second.filename).is_file()

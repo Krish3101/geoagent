@@ -57,6 +57,12 @@ async def test_artifact_row_and_download(client: AsyncClient, test_env):
 @pytest.mark.asyncio
 async def test_artifact_path_traversal_rejected(client: AsyncClient, test_env):
     factory = test_env["session_factory"]
+    runs_dir = test_env["runs_dir"]
+
+    # A real file next to runs_dir: without the guard the route would serve it with 200.
+    secret = runs_dir.parent / "secret.txt"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    secret.write_text("secret")
 
     async with factory() as session:
         s = Session()
@@ -66,13 +72,12 @@ async def test_artifact_path_traversal_rejected(client: AsyncClient, test_env):
         session.add(t)
         await session.flush()
 
-        # Malicious artifact pointing outside runs_dir
         art = Artifact(
             task_id=t.id,
             kind="vector",
-            filename="passwd",
-            relative_path="runs/../../etc/passwd",
-            size_bytes=100,
+            filename="secret.txt",
+            relative_path="runs/../secret.txt",
+            size_bytes=6,
             bounds=[0, 0, 0, 0],
             meta={},
         )
@@ -81,4 +86,5 @@ async def test_artifact_path_traversal_rejected(client: AsyncClient, test_env):
         artifact_id = art.id
 
     res = await client.get(f"/api/artifacts/{artifact_id}/download")
-    assert res.status_code in (403, 404)
+    assert res.status_code == 403
+    assert b"secret" not in res.content

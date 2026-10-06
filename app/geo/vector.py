@@ -8,7 +8,7 @@ import shapely.geometry
 from shapely.validation import make_valid
 
 from app.config import settings
-from app.geo.types import GeoArtifact
+from app.geo.types import GeoArtifact, unique_stem
 from app.geo.validity import valid_polygonal
 
 Layer = Literal[
@@ -78,7 +78,8 @@ def extract_vector_layer(
         polygon = shapely.geometry.box(*bbox)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    geojson_path = output_dir / f"{slug}_{layer}.geojson"
+    stem = unique_stem(output_dir, f"{slug}_{layer}", (".geojson",))
+    geojson_path = output_dir / f"{stem}.geojson"
 
     if layer == "boundary":
         gdf = gpd.GeoDataFrame({"name": [aoi.get("name")]}, geometry=[polygon], crs="EPSG:4326")

@@ -11,7 +11,7 @@ import rioxarray  # noqa: F401
 import shapely.geometry
 
 from app.config import settings
-from app.geo.types import GeoArtifact, NDVIResult
+from app.geo.types import GeoArtifact, NDVIResult, unique_stem
 
 # Set GDAL timeouts
 os.environ.setdefault("GDAL_HTTP_TIMEOUT", "30")
@@ -169,8 +169,9 @@ def fetch_ndvi_product(
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    out_file = output_dir / f"{slug}_ndvi.tif"
-    preview_file = output_dir / f"{slug}_ndvi_preview.png"
+    stem = unique_stem(output_dir, f"{slug}_ndvi", (".tif", "_preview.png"))
+    out_file = output_dir / f"{stem}.tif"
+    preview_file = output_dir / f"{stem}_preview.png"
 
     polygon = shapely.geometry.shape(geom_dict)
     ds = ds.rio.clip([polygon], crs="EPSG:4326", all_touched=True)

@@ -88,7 +88,10 @@ def classify_failure(error: Exception, task_id: str) -> tuple[str, str]:
     if isinstance(error, TimeoutError):
         return "timeout", "That request timed out. Please try a smaller area or simpler request."
     if getattr(error, "status_code", None) == 429:
-        return "rate_limited", "Daily request limit reached. Try again after 00:00 UTC."
+        return (
+            "rate_limited",
+            "The model provider's rate limit was reached. Please try again later.",
+        )
     if isinstance(error, APIConnectionError) or isinstance(error.__cause__, APIConnectionError):
         return (
             "connection_error",

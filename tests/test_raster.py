@@ -50,21 +50,21 @@ def test_offset_depends_on_the_processing_baseline():
 
 
 def test_estimate_resolution_adaptive_stepping():
-    # Small box: ~1km x ~1km -> 10m has (1000/10) * (1000/10) = 10,000 pixels <= 40M -> 10m
+    # Small box: ~1km x ~1km -> 10m has (1000/10) * (1000/10) = 10,000 pixels <= 25M -> 10m
     small_bbox = [0.0, 0.0, 0.01, 0.01]
-    res = ndvi.estimate_resolution(small_bbox, max_pixels=40_000_000)
+    res = ndvi.estimate_resolution(small_bbox, max_pixels=25_000_000)
     assert res == 10
 
-    # Intermediate box: ~100km x ~100km -> 10m has 100M pixels > 40M.
-    # At 20m: (100000/20)^2 = 25M <= 40M -> 20m
-    med_bbox = [0.0, 0.0, 0.9, 0.9]
-    res_med = ndvi.estimate_resolution(med_bbox, max_pixels=40_000_000)
+    # Intermediate box: ~89km x ~89km -> 10m has ~79M pixels > 25M.
+    # At 20m: (89000/20)^2 = ~19.8M <= 25M -> 20m
+    med_bbox = [0.0, 0.0, 0.8, 0.8]
+    res_med = ndvi.estimate_resolution(med_bbox, max_pixels=25_000_000)
     assert res_med == 20
 
     # Very large area: thousands of km -> exceeds even 60m -> raises ValueError
     giant_bbox = [-120.0, 20.0, -70.0, 50.0]
     with pytest.raises(ValueError, match="requires too many pixels even at 60m"):
-        ndvi.estimate_resolution(giant_bbox, max_pixels=40_000_000)
+        ndvi.estimate_resolution(giant_bbox, max_pixels=25_000_000)
 
 
 def test_colorize_ndvi_to_rgba():

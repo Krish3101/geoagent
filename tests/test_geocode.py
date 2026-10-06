@@ -2,6 +2,7 @@ import time
 
 import httpx
 import pytest
+from shapely.geometry import MultiPolygon, Polygon
 
 from app.geo import geocode
 
@@ -110,3 +111,24 @@ async def test_geocode_throttle_enforces_one_second(monkeypatch):
     t1 = time.monotonic()
 
     assert (t1 - t0) >= 0.95  # Throttled by ~1.0s
+
+
+def _square(x: float, y: float, size: float = 0.1, ccw: bool = True) -> Polygon:
+    ring = [(x, y), (x + size, y), (x + size, y + size), (x, y + size)]
+    return Polygon(ring if ccw else ring[::-1])
+
+
+def test_area_of_mixed_orientation_multipolygon_is_sum():
+    a, b = _square(0, 0, ccw=True), _square(1, 1, ccw=False)
+    expected = geocode.compute_geodesic_area_km2(a) + geocode.compute_geodesic_area_km2(b)
+    both = geocode.compute_geodesic_area_km2(MultiPolygon([a, b]))
+    assert both == pytest.approx(expected, abs=0.02)
+    assert both > 0
+
+
+def test_area_of_polygon_with_hole_is_outer_minus_hole():
+    outer = _square(0, 0, 0.2)
+    hole = _square(0.05, 0.05, 0.05)
+    with_hole = Polygon(outer.exterior.coords, [hole.exterior.coords])
+    expected = geocode.compute_geodesic_area_km2(outer) - geocode.compute_geodesic_area_km2(hole)
+    assert geocode.compute_geodesic_area_km2(with_hole) == pytest.approx(expected, abs=0.02)

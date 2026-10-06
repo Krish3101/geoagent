@@ -115,6 +115,10 @@ async function createNewSession() {
     eventSource.close();
     eventSource = null;
   }
+  // The closed stream will never call finishTask for a running task
+  btnSend.disabled = false;
+  btnSend.textContent = "Send";
+  chatTranscript.removeAttribute("aria-busy");
   try {
     const res = await fetch("/api/sessions", { method: "POST" });
     const data = await res.json();
@@ -264,7 +268,7 @@ chatForm.addEventListener("submit", async (e) => {
 
     if (!res.ok) {
       const err = await res.json();
-      appendMessage("assistant", `Error: ${err.detail || "Request failed"}`, true);
+      appendMessage("assistant", `Error: ${formatDetail(err.detail)}`, true);
       btnSend.disabled = false;
       btnSend.textContent = "Send";
       return;
@@ -279,6 +283,18 @@ chatForm.addEventListener("submit", async (e) => {
     btnSend.textContent = "Send";
   }
 });
+
+// FastAPI sends a string for HTTPException but a list of objects for 422 validation errors
+function formatDetail(detail) {
+  if (!detail) return "Request failed";
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d) => (d && d.msg ? d.msg : String(d)))
+      .join("; ");
+  }
+  return "Request failed";
+}
 
 function startTaskListening(taskId, eventsUrl) {
   timeline.replaceChildren();

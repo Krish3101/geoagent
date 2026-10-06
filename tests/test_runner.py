@@ -52,11 +52,11 @@ async def test_missing_api_key_fails_before_running(test_env, monkeypatch, caplo
     assert all(r.levelname == "WARNING" and r.exc_info is None for r in caplog.records)
 
 
-def test_rate_limit_reply_says_when_to_try_again():
+def test_rate_limit_reply_is_neutral():
     error = ModelHTTPError(status_code=429, model_name="free-model", body={})
     code, reply = classify_failure(error, "t1")
     assert code == "rate_limited"
-    assert "00:00 UTC" in reply
+    assert "rate limit" in reply
 
 
 def test_connection_error_reply_says_what_to_do():

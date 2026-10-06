@@ -4,6 +4,7 @@ import time
 import httpx
 import shapely.geometry
 from pyproj import Geod
+from shapely.geometry.polygon import orient
 
 from app.config import settings
 from app.geo.types import GeocodeResult
@@ -16,7 +17,14 @@ _geod = Geod(ellps="WGS84")
 
 def compute_geodesic_area_km2(geom: shapely.geometry.base.BaseGeometry) -> float:
     """Compute true geodesic area in km2 on WGS84 ellipsoid."""
-    area_m2, _ = _geod.geometry_area_perimeter(geom)
+    # Geod returns signed area by ring winding, so a MultiPolygon with mixed orientations
+    # would cancel out. Orient each part counter-clockwise (holes clockwise) before summing.
+    parts = geom.geoms if hasattr(geom, "geoms") else [geom]
+    area_m2 = sum(
+        _geod.geometry_area_perimeter(orient(p, sign=1.0))[0]
+        for p in parts
+        if p.geom_type == "Polygon"
+    )
     return round(abs(area_m2) / 1_000_000.0, 2)
 
 

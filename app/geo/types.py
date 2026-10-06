@@ -1,5 +1,19 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
+
+
+def unique_stem(output_dir: Path, stem: str, suffixes: tuple[str, ...]) -> str:
+    """Return stem, or stem_2, stem_3... so no file with these suffixes exists yet.
+
+    A tool can run twice in one task; without this the second run would overwrite the first
+    file while both artifact rows point at it.
+    """
+    candidate, n = stem, 1
+    while any((output_dir / f"{candidate}{s}").exists() for s in suffixes):
+        n += 1
+        candidate = f"{stem}_{n}"
+    return candidate
 
 
 @dataclass

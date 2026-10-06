@@ -135,8 +135,11 @@ async def test_task_state_never_derives_from_log_text(test_env):
     await transition(tid, STATUS_RUNNING, STATUS_SUCCEEDED)
 
     # Verify no log-text parsing in app source files
-    src_files = list(Path("app").rglob("*.py"))
+    app_dir = Path(__file__).resolve().parent.parent / "app"
+    src_files = list(app_dir.rglob("*.py"))
+    assert src_files, "no source files found, the check would pass vacuously"
     pattern = re.compile(r"status\s*=\s*.*log.*", re.IGNORECASE)
+    assert pattern.search("status = parse(log_text)")
     for p in src_files:
         content = p.read_text()
         for line in content.splitlines():

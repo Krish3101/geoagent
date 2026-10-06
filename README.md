@@ -101,7 +101,7 @@ database from an older version and tells you to do this.
 ## Tests
 
 ```bash
-uv run pytest -q                 # 54 offline tests
+uv run pytest -q                 # 62 offline tests
 uv run pytest -m network         # 3 tests against Nominatim, Overpass and Planetary Computer
 uv run ruff check . && uv run ruff format --check .
 ```
