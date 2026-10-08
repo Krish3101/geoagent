@@ -2,7 +2,6 @@
 
 Getting map data for a place by hand takes several tools: find the place's outline, write an OpenStreetMap query, search a satellite catalogue, compute a vegetation index, export the files. GeoAgent does it from one sentence, such as "buildings and roads around Central Park" or "NDVI of Central Park, July 2025", and returns GeoJSON or a GeoTIFF on a map, ready to download. Language models invent coordinates, so here the model only chooses which tool to run and Python does every geographic step.
 
-![screenshot](screenshot.png)
 
 ## Run (macOS)
 
