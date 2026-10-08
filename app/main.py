@@ -11,10 +11,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.config import settings
 from app.db import SessionLocal, init_db
 from app.routes import router
-from app.tasks.state import recover_stuck_tasks
+from app.tasks import recover_stuck_tasks
 
 logging.basicConfig(
-    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)

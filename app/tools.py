@@ -15,14 +15,14 @@ from pydantic import Field
 from pydantic_ai import ModelRetry, RunContext
 from sqlalchemy import update
 
-from app.config import settings
+from app.config import VECTOR_MAX_AREA_KM2, settings
 from app.db import SessionLocal
 from app.geo.geocode import geocode
 from app.geo.ndvi import fetch_ndvi_product
 from app.geo.types import GeoArtifact
 from app.geo.vector import Layer, extract_vector_layer
-from app.models import Artifact, Session
-from app.tasks.state import log_event
+from app.models import Artifact, ChatSession
+from app.tasks import log_event
 
 logger = logging.getLogger("geoagent.tools")
 
@@ -51,8 +51,8 @@ async def save_session_aoi(session_id: str, aoi: dict[str, Any]) -> None:
     """Save the AOI as soon as it is resolved, so a later failure in the same run keeps it."""
     async with SessionLocal() as session:
         await session.execute(
-            update(Session)
-            .where(Session.id == session_id)
+            update(ChatSession)
+            .where(ChatSession.id == session_id)
             .values(
                 aoi_name=aoi["name"],
                 aoi_source=aoi["source"],
@@ -74,18 +74,19 @@ async def resolve_area(
     """
     try:
         aoi = asdict(await geocode(place))
-    except ValueError:
-        return f"No place found for '{place}'. Ask the user for a more specific name."
-    except RuntimeError as e:
+    except Exception as e:
         logger.warning("task=%s geocoding failed: %s", ctx.deps.task_id, e)
-        return "The geocoding service is not responding right now. Try again later."
+        return (
+            f"Could not resolve '{place}': no match, or the geocoding service failed. "
+            "Ask the user for a more specific name, or try again later."
+        )
 
     ctx.deps.aoi = aoi
     await save_session_aoi(ctx.deps.session_id, aoi)
 
     # the resolved name and size go back to the user, so a wrong guess of place is visible
     summary = f"Resolved to {aoi['name']} ({aoi['area_km2']} km²)"
-    await log_event(ctx.deps.task_id, "geocoding", summary)
+    await log_event(ctx.deps.task_id, "resolve_area", summary)
     return summary + "."
 
 
@@ -106,16 +107,18 @@ async def extract_vector(
 
     unique_layers = list(dict.fromkeys(layers))
     area_km2 = aoi["area_km2"]
-    if area_km2 > settings.vector_max_area_km2 and unique_layers != ["boundary"]:
+    if area_km2 > VECTOR_MAX_AREA_KM2 and unique_layers != ["boundary"]:
         logger.warning("task=%s area too large for vector layers", ctx.deps.task_id)
         return (
             f"Area is {area_km2:.1f} km², which exceeds the maximum allowed "
-            f"{settings.vector_max_area_km2} km² for detailed vector extraction. "
+            f"{VECTOR_MAX_AREA_KM2} km² for detailed vector extraction. "
             "Please narrow your area of interest or request only the boundary."
         )
 
     await log_event(
-        ctx.deps.task_id, "vector", f"Extracting {', '.join(unique_layers)} for {aoi['name']}"
+        ctx.deps.task_id,
+        "extract_vector",
+        f"Extracting {', '.join(unique_layers)} for {aoi['name']}",
     )
 
     slug = slugify(aoi["name"])
@@ -133,17 +136,9 @@ async def extract_vector(
                 slug=slug,
                 task_id=ctx.deps.task_id,
             )
-        except ValueError as e:
-            logger.warning("task=%s layer %s refused: %s", ctx.deps.task_id, layer, e)
-            failures.append(f"{layer} failed (too many features, try a smaller area)")
-            continue
-        except (RuntimeError, OSError) as e:
-            logger.warning("task=%s layer %s failed: %s", ctx.deps.task_id, layer, e)
-            failures.append(f"{layer} failed (OpenStreetMap download error)")
-            continue
         except Exception:
-            logger.exception("task=%s layer %s crashed", ctx.deps.task_id, layer)
-            failures.append(f"{layer} failed (unexpected error)")
+            logger.exception("task=%s layer %s failed", ctx.deps.task_id, layer)
+            failures.append(f"{layer} failed (try a smaller area, or try again later)")
             continue
 
         await record_artifact(ctx.deps.task_id, art)
@@ -157,7 +152,7 @@ async def extract_vector(
     return " ".join(parts)
 
 
-async def fetch_imagery(
+async def fetch_ndvi(
     ctx: RunContext[RunDeps],
     start_date: date,
     end_date: date,
@@ -179,7 +174,7 @@ async def fetch_imagery(
 
     await log_event(
         ctx.deps.task_id,
-        "raster",
+        "fetch_ndvi",
         f"Searching Sentinel-2 imagery for {aoi['name']} ({start_date} to {end_date})",
     )
 
@@ -194,24 +189,19 @@ async def fetch_imagery(
             max_cloud_cover=max_cloud_cover,
             task_id=ctx.deps.task_id,
         )
-    except ValueError as e:
-        logger.warning("task=%s no NDVI: %s", ctx.deps.task_id, e)
-        return (
-            "No clear Sentinel-2 scene for that area and dates, or the area is too large. "
-            "Try a wider date range, a higher cloud limit or a smaller area."
-        )
-    except (RuntimeError, OSError) as e:
-        logger.warning("task=%s imagery failed: %s", ctx.deps.task_id, e)
-        return "The imagery service failed. Try again later."
     except Exception:
-        logger.exception("task=%s imagery crashed", ctx.deps.task_id)
-        return "Imagery processing failed unexpectedly. Try a different date range or area."
+        logger.exception("task=%s NDVI failed", ctx.deps.task_id)
+        return (
+            "No NDVI could be made: no clear Sentinel-2 scene, an area that is too large, "
+            "or the imagery service failed. Try a wider date range, a higher cloud limit, "
+            "a smaller area, or try again later."
+        )
 
     await record_artifact(ctx.deps.task_id, ndvi.artifact)
     await record_artifact(ctx.deps.task_id, ndvi.preview_artifact)
     await log_event(
         ctx.deps.task_id,
-        "raster",
+        "fetch_ndvi",
         f"Generated NDVI at {ndvi.resolution} m ({ndvi.cloud_cover:.1f}% cloud)",
     )
 

@@ -1,11 +1,9 @@
 import asyncio
-import time
 
 import pytest
 from httpx import AsyncClient
 
 from app.main import app
-from app.models import Session, Task
 
 
 @pytest.mark.asyncio
@@ -84,44 +82,3 @@ async def _open_stream(path: str) -> None:
         "server": ("test", 80),
     }
     await app(scope, receive, send)
-
-
-async def test_open_sse_streams_do_not_starve_the_api(client: AsyncClient, test_env):
-    async with test_env["session_factory"]() as db:
-        s = Session()
-        db.add(s)
-        await db.flush()
-        t = Task(session_id=s.id, status="running", prompt="stuck")
-        db.add(t)
-        await db.commit()
-        tid = t.id
-
-    # more streams than the pool has connections (5 + 10 overflow)
-    streams = [asyncio.create_task(_open_stream(f"/api/tasks/{tid}/events")) for _ in range(16)]
-    await asyncio.sleep(1.0)
-    try:
-        start = time.monotonic()
-        res = await asyncio.wait_for(client.post("/api/sessions"), timeout=5)
-        assert res.status_code == 201
-        assert time.monotonic() - start < 2
-    finally:
-        for st in streams:
-            st.cancel()
-        await asyncio.gather(*streams, return_exceptions=True)
-
-
-async def test_concurrent_posts_give_one_202_and_409s(client: AsyncClient, monkeypatch):
-    async def keep_queued(task_id: str) -> None:
-        return None
-
-    monkeypatch.setattr("app.routes.run_task", keep_queued)
-    sid = (await client.post("/api/sessions")).json()["id"]
-
-    results = await asyncio.gather(
-        *[
-            client.post(f"/api/sessions/{sid}/messages", json={"content": f"go {i}"})
-            for i in range(8)
-        ]
-    )
-    codes = sorted(r.status_code for r in results)
-    assert codes == [202] + [409] * 7

@@ -7,9 +7,9 @@ import requests
 import shapely.geometry
 from shapely.validation import make_valid
 
-from app.config import settings
+from app.config import NOMINATIM_USER_AGENT, VECTOR_MAX_AREA_KM2, settings
+from app.geo.geocode import valid_polygonal
 from app.geo.types import GeoArtifact, unique_stem
-from app.geo.validity import valid_polygonal
 
 Layer = Literal[
     "boundary",
@@ -32,11 +32,9 @@ LAYER_TAG_MAP: dict[str, dict[str, Any]] = {
 
 
 def _configure_osmnx() -> None:
-    ox.settings.http_user_agent = settings.nominatim_user_agent
+    ox.settings.http_user_agent = NOMINATIM_USER_AGENT
     ox.settings.cache_folder = settings.data_dir / "osm_cache"
     ox.settings.requests_timeout = 60
-    if settings.overpass_url:
-        ox.settings.overpass_url = settings.overpass_url
 
 
 def extract_vector_layer(
@@ -58,10 +56,10 @@ def extract_vector_layer(
         raise ValueError(f"Unknown layer '{layer}'. Must be one of {valid}")
 
     area_km2 = aoi.get("area_km2", 0.0)
-    if area_km2 > settings.vector_max_area_km2 and layer != "boundary":
+    if area_km2 > VECTOR_MAX_AREA_KM2 and layer != "boundary":
         raise ValueError(
             f"Area is {area_km2:.1f} km², which exceeds the maximum allowed "
-            f"{settings.vector_max_area_km2} km² for detailed vector extraction. "
+            f"{VECTOR_MAX_AREA_KM2} km² for detailed vector extraction. "
             "Please narrow your area of interest or request only the boundary."
         )
 

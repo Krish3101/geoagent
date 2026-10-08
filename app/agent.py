@@ -5,20 +5,20 @@ from pydantic_ai import Agent, RunContext, Tool
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
-from app.config import settings
-from app.tools import RunDeps, extract_vector, fetch_imagery, resolve_area
+from app.config import LLM_BASE_URL, settings
+from app.tools import RunDeps, extract_vector, fetch_ndvi, resolve_area
 
 
 def build_model() -> OpenAIChatModel:
     # built per run, only after the runner has checked that a key is set
     client = AsyncOpenAI(
-        base_url=settings.llm_base_url,
+        base_url=LLM_BASE_URL,
         api_key=settings.openrouter_api_key,
         timeout=60.0,
         max_retries=1,
         default_headers={"X-Title": "geoagent"},
     )
-    return OpenAIChatModel(settings.model_name, provider=OpenRouterProvider(openai_client=client))
+    return OpenAIChatModel(settings.model, provider=OpenRouterProvider(openai_client=client))
 
 
 def system_prompt(today: str, aoi: dict | None) -> str:
@@ -40,7 +40,7 @@ def system_prompt(today: str, aoi: dict | None) -> str:
         "- For vector layers, call extract_vector(layers=[...]). "
         "Valid layers: boundary, buildings, roads, waterways, landuse, amenities, natural.\n"
         "- For satellite imagery or NDVI, convert relative dates to ISO YYYY-MM-DD "
-        "and call fetch_imagery.\n"
+        "and call fetch_ndvi.\n"
         "- Summarize tool results concisely in 1-2 sentences."
     )
 
@@ -52,7 +52,7 @@ agent = Agent(
     tools=[
         Tool(resolve_area, sequential=True),
         Tool(extract_vector, sequential=True),
-        Tool(fetch_imagery, sequential=True),
+        Tool(fetch_ndvi, sequential=True),
     ],
     model_settings={"parallel_tool_calls": False},
 )

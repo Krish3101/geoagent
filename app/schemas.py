@@ -39,17 +39,6 @@ class MessageResponse(BaseModel):
     created_at: datetime
 
 
-class TaskResponse(BaseModel):
-    id: str
-    session_id: str
-    status: str
-    prompt: str
-    error: str | None = None
-    created_at: datetime
-    finished_at: datetime | None = None
-    artifact_count: int = 0
-
-
 class ArtifactItem(BaseModel):
     id: str
     kind: str

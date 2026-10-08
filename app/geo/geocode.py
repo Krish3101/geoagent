@@ -4,11 +4,14 @@ import time
 import httpx
 import shapely.geometry
 from pyproj import Geod
+from shapely.geometry import Polygon
+from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import orient
+from shapely.ops import unary_union
+from shapely.validation import make_valid
 
-from app.config import settings
+from app.config import NOMINATIM_USER_AGENT
 from app.geo.types import GeocodeResult
-from app.geo.validity import valid_polygonal
 
 _last_nominatim_time: float = 0.0
 _nominatim_lock = asyncio.Lock()
@@ -53,7 +56,7 @@ async def geocode(place: str) -> GeocodeResult:
             "limit": 1,
         }
         headers = {
-            "User-Agent": settings.nominatim_user_agent,
+            "User-Agent": NOMINATIM_USER_AGENT,
         }
 
         try:
@@ -104,3 +107,20 @@ async def geocode(place: str) -> GeocodeResult:
         bbox=bbox,
         area_km2=area_km2,
     )
+
+
+def valid_polygonal(geom: BaseGeometry) -> BaseGeometry:
+    """Repair a geometry and keep only its polygonal parts.
+
+    make_valid can return a GeometryCollection (polygon plus stray lines) or a bare
+    LineString/Point for degenerate input. OSMnx only accepts Polygon/MultiPolygon, so
+    anything else is dropped. Returns an empty Polygon when no area is left; callers
+    decide the fallback.
+    """
+    fixed = make_valid(geom)
+    if fixed.geom_type in ("Polygon", "MultiPolygon"):
+        return fixed
+    parts = [g for g in getattr(fixed, "geoms", []) if g.geom_type in ("Polygon", "MultiPolygon")]
+    if not parts:
+        return Polygon()
+    return unary_union(parts)

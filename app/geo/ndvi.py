@@ -10,7 +10,7 @@ import rasterio
 import rioxarray  # noqa: F401
 import shapely.geometry
 
-from app.config import settings
+from app.config import RASTER_MAX_PIXELS
 from app.geo.types import GeoArtifact, NDVIResult, unique_stem
 
 # Set GDAL timeouts
@@ -117,7 +117,7 @@ def fetch_ndvi_product(
     if not bbox or not geom_dict:
         raise ValueError("AOI is missing bbox or geometry")
 
-    resolution = estimate_resolution(bbox, settings.raster_max_pixels)
+    resolution = estimate_resolution(bbox, RASTER_MAX_PIXELS)
 
     stac_api_url = "https://planetarycomputer.microsoft.com/api/stac/v1"
     catalog = pystac_client.Client.open(

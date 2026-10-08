@@ -1,15 +1,14 @@
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import SessionLocal, get_db
-from app.models import Artifact, Message, Session, Task
+from app.models import Artifact, ChatSession, Message, Task
 from app.schemas import (
     AOISchema,
     ArtifactItem,
@@ -17,11 +16,8 @@ from app.schemas import (
     MessageCreateResponse,
     MessageResponse,
     SessionResponse,
-    TaskResponse,
 )
-from app.sse import event_generator
-from app.tasks.runner import run_task
-from app.tasks.state import STATUS_QUEUED
+from app.tasks import ACTIVE, STATUS_QUEUED, run_task, stream_task_events
 
 router = APIRouter(prefix="/api")
 _background_tasks: set[asyncio.Task[Any]] = set()
@@ -34,9 +30,16 @@ MIME_TYPES = {
 }
 
 
+async def get_session_or_404(db: AsyncSession, session_id: str) -> ChatSession:
+    session = await db.get(ChatSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
 @router.post("/sessions", response_model=SessionResponse, status_code=201)
 async def create_session(db: AsyncSession = Depends(get_db)):
-    session = Session()
+    session = ChatSession()
     db.add(session)
     await db.commit()
     await db.refresh(session)
@@ -47,12 +50,9 @@ async def create_session(db: AsyncSession = Depends(get_db)):
     )
 
 
-@router.get("/sessions/{sid}", response_model=SessionResponse)
-async def get_session(sid: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Session).where(Session.id == sid))
-    session = result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+@router.get("/sessions/{session_id}", response_model=SessionResponse)
+async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
+    session = await get_session_or_404(db, session_id)
 
     aoi = None
     if session.aoi_name and session.aoi_geometry and session.aoi_bbox is not None:
@@ -71,18 +71,15 @@ async def get_session(sid: str, db: AsyncSession = Depends(get_db)):
     )
 
 
-@router.get("/sessions/{sid}/messages", response_model=list[MessageResponse])
-async def get_messages(sid: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Session).where(Session.id == sid))
-    session = result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+@router.get("/sessions/{session_id}/messages", response_model=list[MessageResponse])
+async def get_messages(session_id: str, db: AsyncSession = Depends(get_db)):
+    await get_session_or_404(db, session_id)
 
     # the task status lets the page show replies of failed tasks as errors
     stmt = (
         select(Message, Task.status)
         .outerjoin(Task, Message.task_id == Task.id)
-        .where(Message.session_id == sid)
+        .where(Message.session_id == session_id)
         .order_by(Message.created_at.asc())
     )
     rows = (await db.execute(stmt)).all()
@@ -100,32 +97,31 @@ async def get_messages(sid: str, db: AsyncSession = Depends(get_db)):
     ]
 
 
-@router.post("/sessions/{sid}/messages", response_model=MessageCreateResponse, status_code=202)
+@router.post(
+    "/sessions/{session_id}/messages", response_model=MessageCreateResponse, status_code=202
+)
 async def submit_message(
-    sid: str,
+    session_id: str,
     payload: MessageCreateRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Session).where(Session.id == sid))
-    session = result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    await get_session_or_404(db, session_id)
 
-    # One active task per session. The partial unique index on tasks enforces it, so two
-    # requests that arrive together can't both get in; the loser gets a 409.
-    task = Task(session_id=sid, status=STATUS_QUEUED, prompt=payload.content)
-    db.add(task)
-    try:
-        await db.flush()
-        message = Message(session_id=sid, task_id=task.id, role="user", content=payload.content)
-        db.add(message)
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
+    running = await db.execute(
+        select(Task.id).where(Task.session_id == session_id, Task.status.in_(ACTIVE)).limit(1)
+    )
+    if running.scalar_one_or_none():
         raise HTTPException(
             status_code=409,
             detail="A task is already running for this session. Please wait for it to finish.",
         )
+
+    task = Task(session_id=session_id, status=STATUS_QUEUED, prompt=payload.content)
+    db.add(task)
+    await db.flush()
+    message = Message(session_id=session_id, task_id=task.id, role="user", content=payload.content)
+    db.add(message)
+    await db.commit()
 
     background_task = asyncio.create_task(run_task(task.id))
     _background_tasks.add(background_task)
@@ -139,49 +135,16 @@ async def submit_message(
     )
 
 
-@router.get("/tasks/{tid}", response_model=TaskResponse)
-async def get_task(tid: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Task).where(Task.id == tid))
-    task = result.scalar_one_or_none()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    art_count_stmt = select(func.count(Artifact.id)).where(Artifact.task_id == tid)
-    artifact_count = (await db.execute(art_count_stmt)).scalar() or 0
-
-    return TaskResponse(
-        id=task.id,
-        session_id=task.session_id,
-        status=task.status,
-        prompt=task.prompt,
-        error=task.error,
-        created_at=task.created_at,
-        finished_at=task.finished_at,
-        artifact_count=artifact_count,
-    )
-
-
-@router.get("/tasks/{tid}/events")
-async def get_task_events(
-    tid: str,
-    request: Request,
-    after_seq: int = Query(default=0, ge=0),
-):
+@router.get("/tasks/{task_id}/events")
+async def get_task_events(task_id: str, request: Request):
     # No Depends(get_db) here: it would hold a pooled connection for the whole stream.
     async with SessionLocal() as db:
-        found = (await db.execute(select(Task.id).where(Task.id == tid))).scalar_one_or_none()
+        found = (await db.execute(select(Task.id).where(Task.id == task_id))).scalar_one_or_none()
     if not found:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # EventSource sends Last-Event-ID when it reconnects
-    last_event_id = request.headers.get("Last-Event-ID")
-    if last_event_id and last_event_id.isdigit():
-        seq_start = int(last_event_id)
-    else:
-        seq_start = after_seq
-
     return StreamingResponse(
-        event_generator(tid, request, after_seq=seq_start),
+        stream_task_events(task_id, request),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -191,13 +154,13 @@ async def get_task_events(
     )
 
 
-@router.get("/tasks/{tid}/artifacts", response_model=list[ArtifactItem])
-async def get_task_artifacts(tid: str, db: AsyncSession = Depends(get_db)):
-    task_res = await db.execute(select(Task.id).where(Task.id == tid))
+@router.get("/tasks/{task_id}/artifacts", response_model=list[ArtifactItem])
+async def get_task_artifacts(task_id: str, db: AsyncSession = Depends(get_db)):
+    task_res = await db.execute(select(Task.id).where(Task.id == task_id))
     if not task_res.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Task not found")
 
-    stmt = select(Artifact).where(Artifact.task_id == tid).order_by(Artifact.created_at.asc())
+    stmt = select(Artifact).where(Artifact.task_id == task_id).order_by(Artifact.created_at.asc())
     artifacts = (await db.execute(stmt)).scalars().all()
 
     return [
@@ -214,9 +177,9 @@ async def get_task_artifacts(tid: str, db: AsyncSession = Depends(get_db)):
     ]
 
 
-@router.get("/artifacts/{aid}/download")
-async def download_artifact(aid: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Artifact).where(Artifact.id == aid))
+@router.get("/artifacts/{artifact_id}/download")
+async def download_artifact(artifact_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Artifact).where(Artifact.id == artifact_id))
     artifact = result.scalar_one_or_none()
     if not artifact:
         raise HTTPException(status_code=404, detail="Artifact not found")
